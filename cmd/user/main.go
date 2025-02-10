@@ -13,6 +13,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/ttab/elephant-user/internal"
 	"github.com/ttab/elephantine"
+	"github.com/ttab/elephantine/pg"
 	"github.com/urfave/cli/v2"
 )
 
@@ -110,7 +111,16 @@ func runUser(c *cli.Context) error {
 		return fmt.Errorf("set up authentication: %w", err)
 	}
 
-	service := internal.NewService(logger, nil)
+	store := internal.NewPGStore(logger, dbpool)
+
+	// Open a connection to the database and subscribes to all store notifications.
+	go pg.Subscribe(
+		c.Context, logger, dbpool,
+		store.Messages,
+		store.InboxMessages,
+	)
+
+	service := internal.NewService(logger, store)
 
 	app, err := internal.NewApplication(c.Context, internal.ApplicationParameters{
 		Addr:           addr,

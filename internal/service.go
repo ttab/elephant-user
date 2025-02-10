@@ -7,7 +7,21 @@ import (
 	"github.com/ttab/elephant-api/user"
 )
 
-type Store interface{}
+type MessageEvent struct {
+	ID        int64
+	Recipient string
+}
+
+type Store interface {
+	OnMessageUpdate(
+		ctx context.Context, ch chan MessageEvent,
+		recipient string, afterID int64,
+	)
+	OnInboxMessageUpdate(
+		ctx context.Context, ch chan MessageEvent,
+		recipient string, afterID int64,
+	)
+}
 
 type Service struct {
 	logger *slog.Logger
