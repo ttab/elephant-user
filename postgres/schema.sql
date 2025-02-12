@@ -25,7 +25,7 @@ SET default_table_access_method = heap;
 --
 
 CREATE TABLE public.inbox_message (
-    recepient text NOT NULL,
+    recipient text NOT NULL,
     id bigint NOT NULL,
     created timestamp with time zone DEFAULT now() NOT NULL,
     created_by text NOT NULL,
@@ -39,7 +39,7 @@ CREATE TABLE public.inbox_message (
 --
 
 CREATE TABLE public.message (
-    recepient text NOT NULL,
+    recipient text NOT NULL,
     id bigint NOT NULL,
     type text,
     created timestamp with time zone DEFAULT now() NOT NULL,
@@ -47,6 +47,17 @@ CREATE TABLE public.message (
     doc_uuid uuid,
     doc_type text,
     payload jsonb NOT NULL
+);
+
+
+--
+-- Name: message_write_lock; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.message_write_lock (
+    recipient text NOT NULL,
+    message_type text NOT NULL,
+    current_message_id bigint
 );
 
 
@@ -64,7 +75,7 @@ CREATE TABLE public.schema_version (
 --
 
 ALTER TABLE ONLY public.inbox_message
-    ADD CONSTRAINT inbox_message_pkey PRIMARY KEY (recepient, id);
+    ADD CONSTRAINT inbox_message_pkey PRIMARY KEY (recipient, id);
 
 
 --
@@ -72,7 +83,15 @@ ALTER TABLE ONLY public.inbox_message
 --
 
 ALTER TABLE ONLY public.message
-    ADD CONSTRAINT message_pkey PRIMARY KEY (recepient, id);
+    ADD CONSTRAINT message_pkey PRIMARY KEY (recipient, id);
+
+
+--
+-- Name: message_write_lock message_write_lock_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.message_write_lock
+    ADD CONSTRAINT message_write_lock_pkey PRIMARY KEY (recipient, message_type);
 
 
 --

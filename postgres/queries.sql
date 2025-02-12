@@ -1,0 +1,41 @@
+-- name: ListInboxMessages :many
+SELECT recipient, id, created, created_by, updated, payload
+FROM inbox_message
+WHERE recipient = @recipient
+      AND (@before_id::bigint = 0 OR id < @before_id)
+ORDER BY id DESC
+LIMIT sqlc.arg('limit')::bigint;
+
+-- name: GetMessageWriteLock :one
+SELECT recipient, message_type, current_message_id
+FROM message_write_lock
+WHERE recipient = @recipient
+      AND message_type = @message_type
+FOR UPDATE;
+
+-- name: UpsertMessageWriteLock :exec
+INSERT INTO message_write_lock(
+      recipient, message_type, current_message_id
+) VALUES (
+      @recipient, @message_type, @current_message_id
+)
+ON CONFLICT(recipient, message_type)
+DO UPDATE
+SET current_message_id = EXCLUDED.current_message_id;
+
+-- name: InsertInboxMessage :exec
+INSERT INTO inbox_message(
+      recipient, id, created, created_by, updated, payload
+) VALUES (
+      @recipient, @id, @created, @created_by, @updated, @payload
+);
+
+-- name: InsertMessage :exec
+INSERT INTO message(
+      recipient, id, type, created, created_by, doc_uuid, doc_type, payload
+) VALUES (
+      @recipient, @id, @type, @created, @created_by, @doc_uuid, @doc_type, @payload
+);
+
+-- name: Notify :exec
+SELECT pg_notify(@channel::text, @message::text);
