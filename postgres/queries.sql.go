@@ -11,6 +11,22 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const deleteInboxMessage = `-- name: DeleteInboxMessage :exec
+DELETE FROM inbox_message
+WHERE recipient = $1
+      AND id = $2
+`
+
+type DeleteInboxMessageParams struct {
+	Recipient string
+	ID        int64
+}
+
+func (q *Queries) DeleteInboxMessage(ctx context.Context, arg DeleteInboxMessageParams) error {
+	_, err := q.db.Exec(ctx, deleteInboxMessage, arg.Recipient, arg.ID)
+	return err
+}
+
 const getMessageWriteLock = `-- name: GetMessageWriteLock :one
 SELECT recipient, message_type, current_message_id
 FROM message_write_lock

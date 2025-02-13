@@ -56,5 +56,5 @@ func (a *Application) Run(ctx context.Context) error {
 		return server.ListenAndServe(grace.CancelOnQuit(ctx))
 	})
 
-	return grp.Wait() //nolint: wrapcheck
+	return grp.Wait() //nolint:wrapcheck
 }

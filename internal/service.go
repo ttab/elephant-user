@@ -66,6 +66,9 @@ type Store interface {
 	InsertMessage(
 		ctx context.Context, message Message,
 	) error
+	DeleteInboxMessage(
+		ctx context.Context, recipient string, id int64,
+	) error
 }
 
 type Service struct {
@@ -87,9 +90,26 @@ var _ user.Messages = &Service{}
 
 // DeleteInboxMessage implements user.Messages.
 func (s *Service) DeleteInboxMessage(
-	context.Context, *user.DeleteInboxMessageRequest,
+	ctx context.Context, req *user.DeleteInboxMessageRequest,
 ) (*user.DeleteInboxMessageResponse, error) {
-	panic("unimplemented")
+	auth, err := elephantine.RequireAnyScope(ctx, ScopeUser)
+	if err != nil {
+		return nil, err //nolint:wrapcheck
+	}
+
+	if req.Id < 1 {
+		return nil, twirp.InvalidArgumentError("id",
+			"cannot be less than 1")
+	}
+
+	err = s.store.DeleteInboxMessage(
+		ctx, auth.Claims.Subject, req.Id,
+	)
+	if err != nil {
+		return nil, twirp.InternalError("delete inbox message")
+	}
+
+	return &user.DeleteInboxMessageResponse{}, nil
 }
 
 // ListInboxMessages implements user.Messages.
@@ -208,7 +228,8 @@ func (s *Service) PushMessage(
 	if req.DocUuid != "" {
 		parsed, err := uuid.Parse(req.DocUuid)
 		if err != nil {
-			return nil, twirp.InvalidArgumentError("doc_uuid", err.Error())
+			return nil, twirp.InvalidArgumentError(
+				"doc_uuid", err.Error())
 		}
 
 		docUUID = &parsed

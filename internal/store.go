@@ -117,7 +117,9 @@ func (s *PGStore) ListInboxMessages(
 }
 
 // InsertInboxMessage implements Store.
-func (s *PGStore) InsertInboxMessage(ctx context.Context, message InboxMessage) (outErr error) {
+func (s *PGStore) InsertInboxMessage(
+	ctx context.Context, message InboxMessage,
+) (outErr error) {
 	tx, err := s.dbpool.Begin(ctx)
 	if err != nil {
 		return fmt.Errorf("begin transaction: %w", err)
@@ -194,7 +196,9 @@ func (s *PGStore) InsertInboxMessage(ctx context.Context, message InboxMessage) 
 }
 
 // InsertMessage implements Store.
-func (s *PGStore) InsertMessage(ctx context.Context, message Message) (outErr error) {
+func (s *PGStore) InsertMessage(
+	ctx context.Context, message Message,
+) (outErr error) {
 	tx, err := s.dbpool.Begin(ctx)
 	if err != nil {
 		return fmt.Errorf("begin transaction: %w", err)
@@ -266,6 +270,21 @@ func (s *PGStore) InsertMessage(ctx context.Context, message Message) (outErr er
 	err = tx.Commit(ctx)
 	if err != nil {
 		return fmt.Errorf("commit transaction: %w", err)
+	}
+
+	return nil
+}
+
+// DeleteInboxMessage implements Store.
+func (s *PGStore) DeleteInboxMessage(
+	ctx context.Context, recipient string, id int64,
+) error {
+	err := s.q.DeleteInboxMessage(ctx, postgres.DeleteInboxMessageParams{
+		Recipient: recipient,
+		ID:        id,
+	})
+	if err != nil {
+		return fmt.Errorf("delete inbox message: %w", err)
 	}
 
 	return nil

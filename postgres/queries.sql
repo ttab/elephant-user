@@ -37,5 +37,10 @@ INSERT INTO message(
       @recipient, @id, @type, @created, @created_by, @doc_uuid, @doc_type, @payload
 );
 
+-- name: DeleteInboxMessage :exec
+DELETE FROM inbox_message
+WHERE recipient = @recipient
+      AND id = @id;
+
 -- name: Notify :exec
 SELECT pg_notify(@channel::text, @message::text);
