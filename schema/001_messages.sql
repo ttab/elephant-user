@@ -16,6 +16,7 @@ CREATE TABLE IF NOT EXISTS inbox_message(
        created timestamptz not null default NOW(),
        created_by text not null,
        updated timestamptz not null default NOW(),
+       is_read bool not null default false,
        payload jsonb not null,
        primary key(recipient, id)
 );

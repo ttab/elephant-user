@@ -33,9 +33,9 @@ func (q *Queries) GetMessageWriteLock(ctx context.Context, arg GetMessageWriteLo
 
 const insertInboxMessage = `-- name: InsertInboxMessage :exec
 INSERT INTO inbox_message(
-      recipient, id, created, created_by, updated, payload
+      recipient, id, created, created_by, updated, is_read, payload
 ) VALUES (
-      $1, $2, $3, $4, $5, $6
+      $1, $2, $3, $4, $5, $6, $7
 )
 `
 
@@ -45,6 +45,7 @@ type InsertInboxMessageParams struct {
 	Created   pgtype.Timestamptz
 	CreatedBy string
 	Updated   pgtype.Timestamptz
+	IsRead    bool
 	Payload   []byte
 }
 
@@ -55,6 +56,7 @@ func (q *Queries) InsertInboxMessage(ctx context.Context, arg InsertInboxMessage
 		arg.Created,
 		arg.CreatedBy,
 		arg.Updated,
+		arg.IsRead,
 		arg.Payload,
 	)
 	return err
@@ -94,7 +96,7 @@ func (q *Queries) InsertMessage(ctx context.Context, arg InsertMessageParams) er
 }
 
 const listInboxMessages = `-- name: ListInboxMessages :many
-SELECT recipient, id, created, created_by, updated, payload
+SELECT recipient, id, created, created_by, updated, is_read, payload
 FROM inbox_message
 WHERE recipient = $1
       AND ($2::bigint = 0 OR id < $2)
@@ -123,6 +125,7 @@ func (q *Queries) ListInboxMessages(ctx context.Context, arg ListInboxMessagesPa
 			&i.Created,
 			&i.CreatedBy,
 			&i.Updated,
+			&i.IsRead,
 			&i.Payload,
 		); err != nil {
 			return nil, err

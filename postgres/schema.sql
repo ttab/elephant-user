@@ -30,6 +30,7 @@ CREATE TABLE public.inbox_message (
     created timestamp with time zone DEFAULT now() NOT NULL,
     created_by text NOT NULL,
     updated timestamp with time zone DEFAULT now() NOT NULL,
+    is_read boolean DEFAULT false NOT NULL,
     payload jsonb NOT NULL
 );
 

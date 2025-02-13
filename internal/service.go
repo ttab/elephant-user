@@ -25,6 +25,7 @@ type InboxMessage struct {
 	Created   time.Time
 	CreatedBy string
 	Updated   time.Time
+	IsRead    bool
 	Payload   *newsdoc.Document
 }
 
@@ -127,6 +128,7 @@ func (s *Service) ListInboxMessages(
 			Created:   msgs[i].Created.Format(time.RFC3339),
 			CreatedBy: msgs[i].CreatedBy,
 			Updated:   updated,
+			IsRead:    msgs[i].IsRead,
 			Payload:   msgs[i].Payload,
 		})
 	}
@@ -173,6 +175,7 @@ func (s *Service) PushInboxMessage(
 		Created:   now,
 		CreatedBy: auth.Claims.Subject,
 		Updated:   now,
+		IsRead:    false,
 		Payload:   req.Payload,
 	})
 	if err != nil {

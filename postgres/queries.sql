@@ -1,5 +1,5 @@
 -- name: ListInboxMessages :many
-SELECT recipient, id, created, created_by, updated, payload
+SELECT recipient, id, created, created_by, updated, is_read, payload
 FROM inbox_message
 WHERE recipient = @recipient
       AND (@before_id::bigint = 0 OR id < @before_id)
@@ -25,9 +25,9 @@ SET current_message_id = EXCLUDED.current_message_id;
 
 -- name: InsertInboxMessage :exec
 INSERT INTO inbox_message(
-      recipient, id, created, created_by, updated, payload
+      recipient, id, created, created_by, updated, is_read, payload
 ) VALUES (
-      @recipient, @id, @created, @created_by, @updated, @payload
+      @recipient, @id, @created, @created_by, @updated, @is_read, @payload
 );
 
 -- name: InsertMessage :exec

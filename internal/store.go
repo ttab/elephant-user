@@ -106,6 +106,7 @@ func (s *PGStore) ListInboxMessages(
 			Created:   rows[i].Created.Time,
 			CreatedBy: rows[i].CreatedBy,
 			Updated:   rows[i].Updated.Time,
+			IsRead:    rows[i].IsRead,
 			Payload:   &doc,
 		}
 
@@ -154,6 +155,7 @@ func (s *PGStore) InsertInboxMessage(ctx context.Context, message InboxMessage) 
 			Created:   pg.Time(message.Created),
 			CreatedBy: message.CreatedBy,
 			Updated:   pg.Time(message.Updated),
+			IsRead:    message.IsRead,
 			Payload:   payload,
 		})
 

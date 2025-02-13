@@ -14,6 +14,7 @@ type InboxMessage struct {
 	Created   pgtype.Timestamptz
 	CreatedBy string
 	Updated   pgtype.Timestamptz
+	IsRead    bool
 	Payload   []byte
 }
 
