@@ -66,6 +66,10 @@ type Store interface {
 	InsertMessage(
 		ctx context.Context, message Message,
 	) error
+	UpdateInboxMessage(
+		ctx context.Context, recipient string,
+		id int64, isRead bool,
+	) error
 	DeleteInboxMessage(
 		ctx context.Context, recipient string, id int64,
 	) error
@@ -254,7 +258,24 @@ func (s *Service) PushMessage(
 
 // UpdateInboxMessage implements user.Messages.
 func (s *Service) UpdateInboxMessage(
-	context.Context, *user.UpdateInboxMessageRequest,
+	ctx context.Context, req *user.UpdateInboxMessageRequest,
 ) (*user.UpdateInboxMessageResponse, error) {
-	panic("unimplemented")
+	auth, err := elephantine.RequireAnyScope(ctx, ScopeUser)
+	if err != nil {
+		return nil, err //nolint:wrapcheck
+	}
+
+	if req.Id < 1 {
+		return nil, twirp.InvalidArgumentError("id",
+			"cannot be less than 1")
+	}
+
+	err = s.store.UpdateInboxMessage(
+		ctx, auth.Claims.Subject, req.Id, req.IsRead,
+	)
+	if err != nil {
+		return nil, twirp.InternalError("update inbox message")
+	}
+
+	return &user.UpdateInboxMessageResponse{}, nil
 }

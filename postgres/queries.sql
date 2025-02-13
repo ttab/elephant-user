@@ -37,6 +37,12 @@ INSERT INTO message(
       @recipient, @id, @type, @created, @created_by, @doc_uuid, @doc_type, @payload
 );
 
+-- name: UpdateInboxMessage :exec
+UPDATE inbox_message
+SET is_read = @is_read
+WHERE recipient = @recipient
+      AND id = @id;
+
 -- name: DeleteInboxMessage :exec
 DELETE FROM inbox_message
 WHERE recipient = @recipient

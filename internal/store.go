@@ -275,6 +275,22 @@ func (s *PGStore) InsertMessage(
 	return nil
 }
 
+// UpdateInboxMessage implements Store.
+func (s *PGStore) UpdateInboxMessage(
+	ctx context.Context, recipient string, id int64, isRead bool,
+) error {
+	err := s.q.UpdateInboxMessage(ctx, postgres.UpdateInboxMessageParams{
+		Recipient: recipient,
+		ID:        id,
+		IsRead:    isRead,
+	})
+	if err != nil {
+		return fmt.Errorf("update inbox message: %w", err)
+	}
+
+	return nil
+}
+
 // DeleteInboxMessage implements Store.
 func (s *PGStore) DeleteInboxMessage(
 	ctx context.Context, recipient string, id int64,

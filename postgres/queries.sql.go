@@ -168,6 +168,24 @@ func (q *Queries) Notify(ctx context.Context, arg NotifyParams) error {
 	return err
 }
 
+const updateInboxMessage = `-- name: UpdateInboxMessage :exec
+UPDATE inbox_message
+SET is_read = $1
+WHERE recipient = $2
+      AND id = $3
+`
+
+type UpdateInboxMessageParams struct {
+	IsRead    bool
+	Recipient string
+	ID        int64
+}
+
+func (q *Queries) UpdateInboxMessage(ctx context.Context, arg UpdateInboxMessageParams) error {
+	_, err := q.db.Exec(ctx, updateInboxMessage, arg.IsRead, arg.Recipient, arg.ID)
+	return err
+}
+
 const upsertMessageWriteLock = `-- name: UpsertMessageWriteLock :exec
 INSERT INTO message_write_lock(
       recipient, message_type, current_message_id
