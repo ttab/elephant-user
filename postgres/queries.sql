@@ -1,8 +1,24 @@
--- name: ListInboxMessages :many
+-- name: ListInboxMessagesBeforeId :many
 SELECT recipient, id, created, created_by, updated, is_read, payload
 FROM inbox_message
 WHERE recipient = @recipient
       AND (@before_id::bigint = 0 OR id < @before_id)
+ORDER BY id DESC
+LIMIT sqlc.arg('limit')::bigint;
+
+-- name: ListInboxMessagesAfterId :many
+SELECT recipient, id, created, created_by, updated, is_read, payload
+FROM inbox_message
+WHERE recipient = @recipient
+      AND id > @after_id
+ORDER BY id DESC
+LIMIT sqlc.arg('limit')::bigint;
+
+-- name: ListMessagesAfterId :many
+SELECT recipient, id, type, created, created_by, doc_uuid, doc_type, payload
+FROM message
+WHERE recipient = @recipient
+      AND id > @after_id
 ORDER BY id DESC
 LIMIT sqlc.arg('limit')::bigint;
 
@@ -36,6 +52,15 @@ INSERT INTO message(
 ) VALUES (
       @recipient, @id, @type, @created, @created_by, @doc_uuid, @doc_type, @payload
 );
+
+-- name: UpsertUser :exec
+INSERT INTO "user"(
+      sub, created
+) VALUES (
+      @sub, @created
+)
+ON CONFLICT (sub)
+DO NOTHING;
 
 -- name: UpdateInboxMessage :exec
 UPDATE inbox_message

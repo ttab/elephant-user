@@ -2,8 +2,8 @@
 -- PostgreSQL database dump
 --
 
--- Dumped from database version 16.2 (Debian 16.2-1.pgdg120+2)
--- Dumped by pg_dump version 16.2 (Debian 16.2-1.pgdg120+2)
+-- Dumped from database version 16.4 (Debian 16.4-1.pgdg120+2)
+-- Dumped by pg_dump version 16.4 (Debian 16.4-1.pgdg120+2)
 
 SET statement_timeout = 0;
 SET lock_timeout = 0;
@@ -72,6 +72,16 @@ CREATE TABLE public.schema_version (
 
 
 --
+-- Name: user; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public."user" (
+    sub text NOT NULL,
+    created timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+--
 -- Name: inbox_message inbox_message_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -93,6 +103,38 @@ ALTER TABLE ONLY public.message
 
 ALTER TABLE ONLY public.message_write_lock
     ADD CONSTRAINT message_write_lock_pkey PRIMARY KEY (recipient, message_type);
+
+
+--
+-- Name: user user_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."user"
+    ADD CONSTRAINT user_pkey PRIMARY KEY (sub);
+
+
+--
+-- Name: inbox_message inbox_message_recipient_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.inbox_message
+    ADD CONSTRAINT inbox_message_recipient_fkey FOREIGN KEY (recipient) REFERENCES public."user"(sub) ON DELETE CASCADE;
+
+
+--
+-- Name: message message_recipient_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.message
+    ADD CONSTRAINT message_recipient_fkey FOREIGN KEY (recipient) REFERENCES public."user"(sub) ON DELETE CASCADE;
+
+
+--
+-- Name: message_write_lock message_write_lock_recipient_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.message_write_lock
+    ADD CONSTRAINT message_write_lock_recipient_fkey FOREIGN KEY (recipient) REFERENCES public."user"(sub) ON DELETE CASCADE;
 
 
 --

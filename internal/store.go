@@ -77,11 +77,13 @@ func (s *PGStore) OnInboxMessageUpdate(
 	})
 }
 
-// ListInboxMessages implements Store.
-func (s *PGStore) ListInboxMessages(
+// ListInboxMessagesBeforeID implements Store.
+//
+//nolint:dupl
+func (s *PGStore) ListInboxMessagesBeforeID(
 	ctx context.Context, recipient string, beforeID int64, size int64,
 ) ([]InboxMessage, error) {
-	rows, err := s.q.ListInboxMessages(ctx, postgres.ListInboxMessagesParams{
+	rows, err := s.q.ListInboxMessagesBeforeId(ctx, postgres.ListInboxMessagesBeforeIdParams{
 		Recipient: recipient,
 		BeforeID:  beforeID,
 		Limit:     size,
@@ -116,6 +118,86 @@ func (s *PGStore) ListInboxMessages(
 	return res, nil
 }
 
+// ListInboxMessagesAfterID implements Store.
+//
+//nolint:dupl
+func (s *PGStore) ListInboxMessagesAfterID(
+	ctx context.Context, recipient string, afterID int64, size int64,
+) ([]InboxMessage, error) {
+	rows, err := s.q.ListInboxMessagesAfterId(ctx, postgres.ListInboxMessagesAfterIdParams{
+		Recipient: recipient,
+		AfterID:   afterID,
+		Limit:     size,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("list inbox messages: %w", err)
+	}
+
+	var res []InboxMessage
+
+	for i := range rows {
+		var doc newsdoc.Document
+
+		err = json.Unmarshal(rows[i].Payload, &doc)
+		if err != nil {
+			return nil, fmt.Errorf("unmarshal payload: %w", err)
+		}
+
+		msg := InboxMessage{
+			Recipient: rows[i].Recipient,
+			ID:        rows[i].ID,
+			Created:   rows[i].Created.Time,
+			CreatedBy: rows[i].CreatedBy,
+			Updated:   rows[i].Updated.Time,
+			IsRead:    rows[i].IsRead,
+			Payload:   &doc,
+		}
+
+		res = append(res, msg)
+	}
+
+	return res, nil
+}
+
+// ListMessagesAfterID implements Store.
+func (s *PGStore) ListMessagesAfterID(
+	ctx context.Context, recipient string, afterID int64, size int64,
+) ([]Message, error) {
+	rows, err := s.q.ListMessagesAfterId(ctx, postgres.ListMessagesAfterIdParams{
+		Recipient: recipient,
+		AfterID:   afterID,
+		Limit:     size,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("list messages: %w", err)
+	}
+
+	var res []Message
+
+	for i := range rows {
+		var payload map[string]string
+
+		err = json.Unmarshal(rows[i].Payload, &payload)
+		if err != nil {
+			return nil, fmt.Errorf("unmarshal payload: %w", err)
+		}
+
+		msg := Message{
+			Recipient: rows[i].Recipient,
+			ID:        rows[i].ID,
+			Created:   rows[i].Created.Time,
+			CreatedBy: rows[i].CreatedBy,
+			DocUUID:   pg.ToUUIDPointer(rows[i].DocUuid),
+			DocType:   rows[i].DocType.String,
+			Payload:   payload,
+		}
+
+		res = append(res, msg)
+	}
+
+	return res, nil
+}
+
 // InsertInboxMessage implements Store.
 func (s *PGStore) InsertInboxMessage(
 	ctx context.Context, message InboxMessage,
@@ -130,6 +212,14 @@ func (s *PGStore) InsertInboxMessage(
 	defer pg.Rollback(tx, &outErr)
 
 	q := postgres.New(tx)
+
+	err = q.UpsertUser(ctx, postgres.UpsertUserParams{
+		Sub:     message.Recipient,
+		Created: pg.Time(message.Created),
+	})
+	if err != nil {
+		return fmt.Errorf("upsert user: %w", err)
+	}
 
 	var nextID int64
 
@@ -209,6 +299,14 @@ func (s *PGStore) InsertMessage(
 	defer pg.Rollback(tx, &outErr)
 
 	q := postgres.New(tx)
+
+	err = q.UpsertUser(ctx, postgres.UpsertUserParams{
+		Sub:     message.Recipient,
+		Created: pg.Time(message.Created),
+	})
+	if err != nil {
+		return fmt.Errorf("upsert user: %w", err)
+	}
 
 	var nextID int64
 

@@ -56,10 +56,18 @@ type Store interface {
 		ctx context.Context, ch chan MessageEvent,
 		recipient string, afterID int64,
 	)
-	ListInboxMessages(
+	ListInboxMessagesBeforeID(
 		ctx context.Context, recipient string,
 		beforeID int64, size int64,
 	) ([]InboxMessage, error)
+	ListInboxMessagesAfterID(
+		ctx context.Context, recipient string,
+		afterID int64, size int64,
+	) ([]InboxMessage, error)
+	ListMessagesAfterID(
+		ctx context.Context, recipient string,
+		afterID int64, size int64,
+	) ([]Message, error)
 	InsertInboxMessage(
 		ctx context.Context, message InboxMessage,
 	) error
@@ -130,7 +138,7 @@ func (s *Service) ListInboxMessages(
 		size = req.Size
 	}
 
-	msgs, err := s.store.ListInboxMessages(
+	msgs, err := s.store.ListInboxMessagesBeforeID(
 		ctx, auth.Claims.Subject, req.BeforeId, size,
 	)
 	if err != nil {
@@ -162,16 +170,149 @@ func (s *Service) ListInboxMessages(
 
 // PollInboxMessages implements user.Messages.
 func (s *Service) PollInboxMessages(
-	context.Context, *user.PollInboxMessagesRequest,
+	ctx context.Context, req *user.PollInboxMessagesRequest,
 ) (*user.PollInboxMessagesResponse, error) {
-	panic("unimplemented")
+	auth, err := elephantine.RequireAnyScope(ctx, ScopeUser)
+	if err != nil {
+		return nil, err //nolint:wrapcheck
+	}
+
+	// Start listening for new messages.
+	notifications := make(chan MessageEvent, 1)
+
+	go s.store.OnInboxMessageUpdate(
+		ctx, notifications, auth.Claims.Subject, req.AfterId,
+	)
+
+	limit := int64(10)
+
+	listMessages := func() ([]*user.InboxMessage, error) {
+		msgs, err := s.store.ListInboxMessagesAfterID(
+			ctx, auth.Claims.Subject, req.AfterId, limit,
+		)
+		if err != nil {
+			return nil, err //nolint:wrapcheck
+		}
+
+		var res []*user.InboxMessage
+
+		for i := range msgs {
+			updated := ""
+			if !msgs[i].Updated.IsZero() {
+				updated = msgs[i].Updated.Format(time.RFC3339)
+			}
+
+			res = append(res, &user.InboxMessage{
+				Recipient: msgs[i].Recipient,
+				Id:        msgs[i].ID,
+				Created:   msgs[i].Created.Format(time.RFC3339),
+				CreatedBy: msgs[i].CreatedBy,
+				Updated:   updated,
+				IsRead:    msgs[i].IsRead,
+				Payload:   msgs[i].Payload,
+			})
+		}
+
+		return res, nil
+	}
+
+	// Check if there are already any messages available.
+	msgs, err := listMessages()
+	if err != nil {
+		return nil, twirp.InternalErrorf(
+			"list inbox messages: %w", err)
+	}
+
+	if len(msgs) > 0 {
+		return &user.PollInboxMessagesResponse{Messages: msgs}, nil
+	}
+
+	select {
+	case <-notifications:
+	case <-time.After(30 * time.Second):
+	}
+
+	msgs, err = listMessages()
+	if err != nil {
+		return nil, twirp.InternalErrorf(
+			"list inbox messages: %w", err)
+	}
+
+	return &user.PollInboxMessagesResponse{Messages: msgs}, nil
 }
 
 // PollMessages implements user.Messages.
 func (s *Service) PollMessages(
-	context.Context, *user.PollMessagesRequest,
+	ctx context.Context, req *user.PollMessagesRequest,
 ) (*user.PollMessagesResponse, error) {
-	panic("unimplemented")
+	auth, err := elephantine.RequireAnyScope(ctx, ScopeUser)
+	if err != nil {
+		return nil, err //nolint:wrapcheck
+	}
+
+	// Start listening for new messages.
+	notifications := make(chan MessageEvent, 1)
+
+	go s.store.OnMessageUpdate(
+		ctx, notifications, auth.Claims.Subject, req.AfterId,
+	)
+
+	limit := int64(10)
+
+	listMessages := func() ([]*user.Message, error) {
+		msgs, err := s.store.ListMessagesAfterID(
+			ctx, auth.Claims.Subject, req.AfterId, limit,
+		)
+		if err != nil {
+			return nil, err //nolint:wrapcheck
+		}
+
+		var res []*user.Message
+
+		for i := range msgs {
+			docUUID := ""
+			if msgs[i].DocUUID != nil {
+				docUUID = msgs[i].DocUUID.String()
+			}
+
+			res = append(res, &user.Message{
+				Recipient: msgs[i].Recipient,
+				Id:        msgs[i].ID,
+				Type:      msgs[i].Type,
+				Created:   msgs[i].Created.Format(time.RFC3339),
+				CreatedBy: msgs[i].CreatedBy,
+				DocUuid:   docUUID,
+				DocType:   msgs[i].DocType,
+				Payload:   msgs[i].Payload,
+			})
+		}
+
+		return res, nil
+	}
+
+	// Check if there are already any messages available.
+	msgs, err := listMessages()
+	if err != nil {
+		return nil, twirp.InternalErrorf(
+			"list messages: %w", err)
+	}
+
+	if len(msgs) > 0 {
+		return &user.PollMessagesResponse{Messages: msgs}, nil
+	}
+
+	select {
+	case <-notifications:
+	case <-time.After(30 * time.Second):
+	}
+
+	msgs, err = listMessages()
+	if err != nil {
+		return nil, twirp.InternalErrorf(
+			"list messages: %w", err)
+	}
+
+	return &user.PollMessagesResponse{Messages: msgs}, nil
 }
 
 // PushInboxMessage implements user.Messages.

@@ -111,23 +111,23 @@ func (q *Queries) InsertMessage(ctx context.Context, arg InsertMessageParams) er
 	return err
 }
 
-const listInboxMessages = `-- name: ListInboxMessages :many
+const listInboxMessagesAfterId = `-- name: ListInboxMessagesAfterId :many
 SELECT recipient, id, created, created_by, updated, is_read, payload
 FROM inbox_message
 WHERE recipient = $1
-      AND ($2::bigint = 0 OR id < $2)
+      AND id > $2
 ORDER BY id DESC
 LIMIT $3::bigint
 `
 
-type ListInboxMessagesParams struct {
+type ListInboxMessagesAfterIdParams struct {
 	Recipient string
-	BeforeID  int64
+	AfterID   int64
 	Limit     int64
 }
 
-func (q *Queries) ListInboxMessages(ctx context.Context, arg ListInboxMessagesParams) ([]InboxMessage, error) {
-	rows, err := q.db.Query(ctx, listInboxMessages, arg.Recipient, arg.BeforeID, arg.Limit)
+func (q *Queries) ListInboxMessagesAfterId(ctx context.Context, arg ListInboxMessagesAfterIdParams) ([]InboxMessage, error) {
+	rows, err := q.db.Query(ctx, listInboxMessagesAfterId, arg.Recipient, arg.AfterID, arg.Limit)
 	if err != nil {
 		return nil, err
 	}
@@ -142,6 +142,93 @@ func (q *Queries) ListInboxMessages(ctx context.Context, arg ListInboxMessagesPa
 			&i.CreatedBy,
 			&i.Updated,
 			&i.IsRead,
+			&i.Payload,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listInboxMessagesBeforeId = `-- name: ListInboxMessagesBeforeId :many
+SELECT recipient, id, created, created_by, updated, is_read, payload
+FROM inbox_message
+WHERE recipient = $1
+      AND ($2::bigint = 0 OR id < $2)
+ORDER BY id DESC
+LIMIT $3::bigint
+`
+
+type ListInboxMessagesBeforeIdParams struct {
+	Recipient string
+	BeforeID  int64
+	Limit     int64
+}
+
+func (q *Queries) ListInboxMessagesBeforeId(ctx context.Context, arg ListInboxMessagesBeforeIdParams) ([]InboxMessage, error) {
+	rows, err := q.db.Query(ctx, listInboxMessagesBeforeId, arg.Recipient, arg.BeforeID, arg.Limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []InboxMessage
+	for rows.Next() {
+		var i InboxMessage
+		if err := rows.Scan(
+			&i.Recipient,
+			&i.ID,
+			&i.Created,
+			&i.CreatedBy,
+			&i.Updated,
+			&i.IsRead,
+			&i.Payload,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listMessagesAfterId = `-- name: ListMessagesAfterId :many
+SELECT recipient, id, type, created, created_by, doc_uuid, doc_type, payload
+FROM message
+WHERE recipient = $1
+      AND id > $2
+ORDER BY id DESC
+LIMIT $3::bigint
+`
+
+type ListMessagesAfterIdParams struct {
+	Recipient string
+	AfterID   int64
+	Limit     int64
+}
+
+func (q *Queries) ListMessagesAfterId(ctx context.Context, arg ListMessagesAfterIdParams) ([]Message, error) {
+	rows, err := q.db.Query(ctx, listMessagesAfterId, arg.Recipient, arg.AfterID, arg.Limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Message
+	for rows.Next() {
+		var i Message
+		if err := rows.Scan(
+			&i.Recipient,
+			&i.ID,
+			&i.Type,
+			&i.Created,
+			&i.CreatedBy,
+			&i.DocUuid,
+			&i.DocType,
 			&i.Payload,
 		); err != nil {
 			return nil, err
@@ -205,5 +292,25 @@ type UpsertMessageWriteLockParams struct {
 
 func (q *Queries) UpsertMessageWriteLock(ctx context.Context, arg UpsertMessageWriteLockParams) error {
 	_, err := q.db.Exec(ctx, upsertMessageWriteLock, arg.Recipient, arg.MessageType, arg.CurrentMessageID)
+	return err
+}
+
+const upsertUser = `-- name: UpsertUser :exec
+INSERT INTO "user"(
+      sub, created
+) VALUES (
+      $1, $2
+)
+ON CONFLICT (sub)
+DO NOTHING
+`
+
+type UpsertUserParams struct {
+	Sub     string
+	Created pgtype.Timestamptz
+}
+
+func (q *Queries) UpsertUser(ctx context.Context, arg UpsertUserParams) error {
+	_, err := q.db.Exec(ctx, upsertUser, arg.Sub, arg.Created)
 	return err
 }

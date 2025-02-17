@@ -38,3 +38,8 @@ type MessageWriteLock struct {
 type SchemaVersion struct {
 	Version int32
 }
+
+type User struct {
+	Sub     string
+	Created pgtype.Timestamptz
+}
