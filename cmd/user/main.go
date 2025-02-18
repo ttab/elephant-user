@@ -120,7 +120,12 @@ func runUser(c *cli.Context) error {
 		store.InboxMessages,
 	)
 
-	service := internal.NewService(logger, store)
+	validator, err := internal.NewValidator(c.Context)
+	if err != nil {
+		return fmt.Errorf("create validator: %w", err)
+	}
+
+	service := internal.NewService(logger, store, validator)
 
 	app, err := internal.NewApplication(c.Context, internal.ApplicationParameters{
 		Addr:           addr,

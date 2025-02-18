@@ -10,11 +10,14 @@ require (
 	github.com/ttab/elephant-api v0.17.8-0.20250213113641-f31431ba2e86
 	github.com/ttab/elephantine v0.17.3
 	github.com/ttab/mage v0.7.5
+	github.com/ttab/newsdoc v0.7.0
+	github.com/ttab/revisor v0.9.3
 	github.com/twitchtv/twirp v8.1.3+incompatible
 	github.com/urfave/cli/v2 v2.27.5
 )
 
 require (
+	github.com/IvanZagoskin/wkt v0.0.1 // indirect
 	github.com/MicahParks/jwkset v0.7.0 // indirect
 	github.com/MicahParks/keyfunc/v3 v3.3.8 // indirect
 	github.com/aws/aws-sdk-go-v2 v1.32.8 // indirect
@@ -36,6 +39,7 @@ require (
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/cpuguy83/go-md2man/v2 v2.0.5 // indirect
 	github.com/go-jose/go-jose/v4 v4.0.1 // indirect
+	github.com/gobwas/glob v0.2.3 // indirect
 	github.com/golang-jwt/jwt/v5 v5.2.1 // indirect
 	github.com/hashicorp/errwrap v1.1.0 // indirect
 	github.com/hashicorp/go-cleanhttp v0.5.2 // indirect
@@ -64,7 +68,6 @@ require (
 	github.com/prometheus/procfs v0.15.1 // indirect
 	github.com/russross/blackfriday/v2 v2.1.0 // indirect
 	github.com/ryanuber/go-glob v1.0.0 // indirect
-	github.com/ttab/newsdoc v0.7.0 // indirect
 	github.com/xrash/smetrics v0.0.0-20240521201337-686a1a2994c1 // indirect
 	golang.org/x/crypto v0.31.0 // indirect
 	golang.org/x/net v0.33.0 // indirect

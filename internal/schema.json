@@ -1,0 +1,75 @@
+{
+  "version": 1,
+  "name": "tt-messages",
+  "documents": [
+    {
+      "name": "Inbox message",
+      "description": "A document that describes an inbox message intended for a recipient.",
+      "declares": "tt/inbox-message",
+      "attributes": {
+        "title": {},
+        "uri": {
+          "glob": [
+            "message://inbox/**"
+          ]
+        }
+      },
+      "meta": [],
+      "links": [],
+      "content": [
+        {
+          "description": "Text block",
+          "declares": {
+            "type": "core/text"
+          },
+          "attributes": {
+            "role": {
+              "optional": true,
+              "enum": [
+                "heading-1",
+                "heading-2"
+              ]
+            }
+          },
+          "data": {
+            "text": {
+              "allowEmpty": true,
+              "format": "html"
+            }
+          }
+        }
+      ]
+    }
+  ],
+  "htmlPolicies": [
+    {
+      "name": "default",
+      "elements": {
+        "strong": {
+          "attributes": {
+            "id": {
+              "optional": true
+            }
+          }
+        },
+        "em": {
+          "attributes": {
+            "id": {
+              "optional": true
+            }
+          }
+        },
+        "a": {
+          "attributes": {
+            "id": {
+              "optional": true
+            },
+            "href": {
+              "optional": true
+            }
+          }
+        }
+      }
+    }
+  ]
+}

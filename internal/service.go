@@ -2,13 +2,17 @@ package internal
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
+	"strconv"
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/ttab/elephant-api/newsdoc"
+	newsdoc_rpc "github.com/ttab/elephant-api/newsdoc"
 	"github.com/ttab/elephant-api/user"
 	"github.com/ttab/elephantine"
+	"github.com/ttab/newsdoc"
+	"github.com/ttab/revisor"
 	"github.com/twitchtv/twirp"
 )
 
@@ -26,7 +30,7 @@ type InboxMessage struct {
 	CreatedBy string
 	Updated   time.Time
 	IsRead    bool
-	Payload   *newsdoc.Document
+	Payload   *newsdoc_rpc.Document
 }
 
 type Message struct {
@@ -83,17 +87,26 @@ type Store interface {
 	) error
 }
 
+type DocumentValidator interface {
+	ValidateDocument(
+		ctx context.Context, document *newsdoc.Document,
+	) ([]revisor.ValidationResult, error)
+}
+
 type Service struct {
-	logger *slog.Logger
-	store  Store
+	logger    *slog.Logger
+	store     Store
+	validator DocumentValidator
 }
 
 func NewService(
 	logger *slog.Logger, store Store,
+	validator DocumentValidator,
 ) *Service {
 	return &Service{
-		logger: logger,
-		store:  store,
+		logger:    logger,
+		store:     store,
+		validator: validator,
 	}
 }
 
@@ -332,7 +345,29 @@ func (s *Service) PushInboxMessage(
 		return nil, twirp.RequiredArgumentError("payload")
 	}
 
-	// TODO: Validate payload.
+	newsdoc := newsdoc_rpc.DocumentFromRPC(req.Payload)
+
+	validationResult, err := s.validator.ValidateDocument(ctx, &newsdoc)
+	if err != nil {
+		return nil, fmt.Errorf("validate newsdoc payload: %w", err)
+	}
+
+	if len(validationResult) > 0 {
+		err := twirp.InvalidArgument.Errorf(
+			"the document had %d validation errors, the first one is: %v",
+			len(validationResult), validationResult[0].String())
+
+		err = err.WithMeta("err_count",
+			strconv.Itoa(len(validationResult)))
+
+		for i := range validationResult {
+			err = err.WithMeta(strconv.Itoa(i),
+				validationResult[i].String())
+		}
+
+		return nil, err
+	}
+
 	now := time.Now()
 
 	err = s.store.InsertInboxMessage(ctx, InboxMessage{
