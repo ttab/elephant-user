@@ -6,54 +6,38 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/ttab/elephant-api/user"
 	"github.com/ttab/elephantine"
 )
 
-type ApplicationParameters struct {
-	Addr           string
-	ProfileAddr    string
+type Parameters struct {
 	Logger         *slog.Logger
-	DBPool         *pgxpool.Pool
+	APIServer      *elephantine.APIServer
 	AuthInfoParser elephantine.AuthInfoParser
 	Registerer     prometheus.Registerer
 	Service        *Service
 }
 
-func NewApplication(
-	_ context.Context, p ApplicationParameters,
-) (*Application, error) {
-	return &Application{
-		p: p,
-	}, nil
-}
-
-type Application struct {
-	p ApplicationParameters
-}
-
-func (a *Application) Run(ctx context.Context) error {
-	grace := elephantine.NewGracefulShutdown(a.p.Logger, 10*time.Second)
-	server := elephantine.NewAPIServer(a.p.Logger, a.p.Addr, a.p.ProfileAddr)
+func Run(ctx context.Context, p Parameters) error {
+	grace := elephantine.NewGracefulShutdown(p.Logger, 10*time.Second)
 
 	opts, err := elephantine.NewDefaultServiceOptions(
-		a.p.Logger, a.p.AuthInfoParser, a.p.Registerer,
+		p.Logger, p.AuthInfoParser, p.Registerer,
 		elephantine.ServiceAuthRequired,
 	)
 	if err != nil {
 		return fmt.Errorf("set up service options: %w", err)
 	}
 
-	checkServer := user.NewMessagesServer(a.p.Service, opts.ServerOptions())
+	messagesServer := user.NewMessagesServer(p.Service, opts.ServerOptions())
 
-	server.RegisterAPI(checkServer, opts)
+	p.APIServer.RegisterAPI(messagesServer, opts)
 
-	grp := elephantine.NewErrGroup(ctx, a.p.Logger)
+	grp := elephantine.NewErrGroup(ctx, p.Logger)
 
 	grp.Go("server", func(ctx context.Context) error {
-		return server.ListenAndServe(grace.CancelOnQuit(ctx))
+		return p.APIServer.ListenAndServe(grace.CancelOnQuit(ctx))
 	})
 
 	return grp.Wait() //nolint:wrapcheck

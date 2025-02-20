@@ -125,22 +125,17 @@ func runUser(c *cli.Context) error {
 		return fmt.Errorf("create validator: %w", err)
 	}
 
+	server := elephantine.NewAPIServer(logger, addr, profileAddr)
+
 	service := internal.NewService(logger, store, validator)
 
-	app, err := internal.NewApplication(c.Context, internal.ApplicationParameters{
-		Addr:           addr,
-		ProfileAddr:    profileAddr,
+	err = internal.Run(c.Context, internal.Parameters{
 		Logger:         logger,
-		DBPool:         dbpool,
+		APIServer:      server,
 		AuthInfoParser: auth.AuthParser,
 		Registerer:     prometheus.DefaultRegisterer,
 		Service:        service,
 	})
-	if err != nil {
-		return fmt.Errorf("create application: %w", err)
-	}
-
-	err = app.Run(c.Context)
 	if err != nil {
 		return fmt.Errorf("run application: %w", err)
 	}

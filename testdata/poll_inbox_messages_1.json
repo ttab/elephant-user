@@ -1,0 +1,25 @@
+{
+  "messages":  [
+    {
+      "recipient":  "core://user/tester",
+      "id":  "1",
+      "created":  "2025-02-20T09:54:12+01:00",
+      "createdBy":  "core://user/tester",
+      "updated":  "2025-02-20T09:54:12+01:00",
+      "payload":  {
+        "uuid":  "3b482036-39fb-584d-8477-111111111111",
+        "type":  "tt/inbox-message",
+        "uri":  "message://inbox/1",
+        "title":  "Inbox Message 1",
+        "content":  [
+          {
+            "type":  "core/text",
+            "data":  {
+              "text":  "Inbox Message Body"
+            }
+          }
+        ]
+      }
+    }
+  ]
+}
