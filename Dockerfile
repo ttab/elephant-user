@@ -9,11 +9,11 @@ ADD . ./
 
 ARG TARGETOS TARGETARCH
 RUN GOOS=$TARGETOS GOARCH=$TARGETARCH \
-    go build -o /build/wire ./cmd/wire
+    go build -o /build/user ./cmd/user
 
 FROM alpine:3.21
 
-COPY --from=build /build/wire /usr/local/bin/wire
+COPY --from=build /build/user /usr/local/bin/user
 
 RUN apk upgrade --no-cache \
     && apk add tzdata
