@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"os"
 	"runtime/debug"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/joho/godotenv"
@@ -119,6 +120,8 @@ func runUser(c *cli.Context) error {
 		store.Messages,
 		store.InboxMessages,
 	)
+
+	go store.RunCleaner(c.Context, 12*time.Hour)
 
 	validator, err := internal.NewValidator(c.Context)
 	if err != nil {

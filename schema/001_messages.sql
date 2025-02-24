@@ -39,9 +39,17 @@ CREATE TABLE IF NOT EXISTS message_write_lock(
     on delete cascade
 );
 
+CREATE TABLE job_lock(
+  name text not null primary key,
+  holder text not null,
+  touched timestamptz not null,
+  iteration bigint not null
+);
+
 ---- create above / drop below ----
 
 DROP TABLE IF EXISTS message;               
 DROP TABLE IF EXISTS inbox_message;
 DROP TABLE IF EXISTS message_write_lock;
 DROP TABLE IF EXISTS "user";
+DROP TABLE IF EXISTS job_lock;

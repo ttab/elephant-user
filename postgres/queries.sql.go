@@ -27,6 +27,26 @@ func (q *Queries) DeleteInboxMessage(ctx context.Context, arg DeleteInboxMessage
 	return err
 }
 
+const deleteOldInboxMessages = `-- name: DeleteOldInboxMessages :exec
+DELETE FROM inbox_message
+WHERE created < now() - INTERVAL '6 months'
+`
+
+func (q *Queries) DeleteOldInboxMessages(ctx context.Context) error {
+	_, err := q.db.Exec(ctx, deleteOldInboxMessages)
+	return err
+}
+
+const deleteOldMessages = `-- name: DeleteOldMessages :exec
+DELETE FROM message
+WHERE created < now() - INTERVAL '2 weeks'
+`
+
+func (q *Queries) DeleteOldMessages(ctx context.Context) error {
+	_, err := q.db.Exec(ctx, deleteOldMessages)
+	return err
+}
+
 const getMessageWriteLock = `-- name: GetMessageWriteLock :one
 SELECT recipient, message_type, current_message_id
 FROM message_write_lock

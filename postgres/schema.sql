@@ -36,6 +36,18 @@ CREATE TABLE public.inbox_message (
 
 
 --
+-- Name: job_lock; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.job_lock (
+    name text NOT NULL,
+    holder text NOT NULL,
+    touched timestamp with time zone NOT NULL,
+    iteration bigint NOT NULL
+);
+
+
+--
 -- Name: message; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -87,6 +99,14 @@ CREATE TABLE public."user" (
 
 ALTER TABLE ONLY public.inbox_message
     ADD CONSTRAINT inbox_message_pkey PRIMARY KEY (recipient, id);
+
+
+--
+-- Name: job_lock job_lock_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.job_lock
+    ADD CONSTRAINT job_lock_pkey PRIMARY KEY (name);
 
 
 --

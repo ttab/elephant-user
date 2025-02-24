@@ -6,11 +6,13 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/ttab/elephant-api/newsdoc"
 	"github.com/ttab/elephant-user/postgres"
+	"github.com/ttab/elephantine"
 	"github.com/ttab/elephantine/pg"
 )
 
@@ -433,6 +435,53 @@ func pgNotify[T any](
 	})
 	if err != nil {
 		return fmt.Errorf("publish notification payload to channel: %w", err)
+	}
+
+	return nil
+}
+
+func (s *PGStore) RunCleaner(ctx context.Context, period time.Duration) {
+	for {
+		select {
+		case <-time.After(period):
+		case <-ctx.Done():
+			return
+		}
+
+		jobLock, err := pg.NewJobLock(s.dbpool, s.logger, "cleaner", pg.JobLockOptions{
+			PingInterval:  10 * time.Second,
+			StaleAfter:    1 * time.Minute,
+			CheckInterval: 20 * time.Second,
+			Timeout:       5 * time.Second,
+		})
+		if err != nil {
+			s.logger.ErrorContext(ctx, "failed to create job lock",
+				elephantine.LogKeyError, err)
+
+			continue
+		}
+
+		err = jobLock.RunWithContext(ctx, s.removeOldMessages)
+		if err != nil {
+			s.logger.ErrorContext(
+				ctx, "lock cleaner error",
+				elephantine.LogKeyError, err,
+			)
+		}
+	}
+}
+
+func (s *PGStore) removeOldMessages(ctx context.Context) error {
+	s.logger.Debug("removing old messages")
+
+	err := s.q.DeleteOldMessages(ctx)
+	if err != nil {
+		return fmt.Errorf("delete old messages: %w", err)
+	}
+
+	err = s.q.DeleteOldInboxMessages(ctx)
+	if err != nil {
+		return fmt.Errorf("delete old inbox messages: %w", err)
 	}
 
 	return nil

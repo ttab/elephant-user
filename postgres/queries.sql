@@ -75,3 +75,11 @@ WHERE recipient = @recipient
 
 -- name: Notify :exec
 SELECT pg_notify(@channel::text, @message::text);
+
+-- name: DeleteOldInboxMessages :exec
+DELETE FROM inbox_message
+WHERE created < now() - INTERVAL '6 months';
+
+-- name: DeleteOldMessages :exec
+DELETE FROM message
+WHERE created < now() - INTERVAL '2 weeks';
