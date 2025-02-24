@@ -178,6 +178,11 @@ func (s *Service) ListInboxMessages(
 		})
 	}
 
+	if len(msgs) > 0 {
+		res.LatestId = msgs[0].ID
+		res.EarliestId = msgs[len(msgs)-1].ID
+	}
+
 	return &res, nil
 }
 
@@ -237,7 +242,10 @@ func (s *Service) PollInboxMessages(
 	}
 
 	if len(msgs) > 0 {
-		return &user.PollInboxMessagesResponse{Messages: msgs}, nil
+		return &user.PollInboxMessagesResponse{
+			LastId:   msgs[0].Id,
+			Messages: msgs,
+		}, nil
 	}
 
 	select {
@@ -251,7 +259,15 @@ func (s *Service) PollInboxMessages(
 			"list inbox messages: %w", err)
 	}
 
-	return &user.PollInboxMessagesResponse{Messages: msgs}, nil
+	lastID := req.AfterId
+	if len(msgs) > 0 {
+		lastID = msgs[0].Id
+	}
+
+	return &user.PollInboxMessagesResponse{
+		LastId:   lastID,
+		Messages: msgs,
+	}, nil
 }
 
 // PollMessages implements user.Messages.
@@ -311,7 +327,10 @@ func (s *Service) PollMessages(
 	}
 
 	if len(msgs) > 0 {
-		return &user.PollMessagesResponse{Messages: msgs}, nil
+		return &user.PollMessagesResponse{
+			LastId:   msgs[0].Id,
+			Messages: msgs,
+		}, nil
 	}
 
 	select {
@@ -325,7 +344,15 @@ func (s *Service) PollMessages(
 			"list messages: %w", err)
 	}
 
-	return &user.PollMessagesResponse{Messages: msgs}, nil
+	lastID := req.AfterId
+	if len(msgs) > 0 {
+		lastID = msgs[0].Id
+	}
+
+	return &user.PollMessagesResponse{
+		LastId:   lastID,
+		Messages: msgs,
+	}, nil
 }
 
 // PushInboxMessage implements user.Messages.
