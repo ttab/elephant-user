@@ -47,6 +47,32 @@ func (q *Queries) DeleteOldMessages(ctx context.Context) error {
 	return err
 }
 
+const getLatestInboxMessageId = `-- name: GetLatestInboxMessageId :one
+SELECT MAX(id)::bigint AS latest_id
+FROM inbox_message
+WHERE recipient = $1
+`
+
+func (q *Queries) GetLatestInboxMessageId(ctx context.Context, recipient string) (int64, error) {
+	row := q.db.QueryRow(ctx, getLatestInboxMessageId, recipient)
+	var latest_id int64
+	err := row.Scan(&latest_id)
+	return latest_id, err
+}
+
+const getLatestMessageId = `-- name: GetLatestMessageId :one
+SELECT MAX(id)::bigint AS latest_id
+FROM message
+WHERE recipient = $1
+`
+
+func (q *Queries) GetLatestMessageId(ctx context.Context, recipient string) (int64, error) {
+	row := q.db.QueryRow(ctx, getLatestMessageId, recipient)
+	var latest_id int64
+	err := row.Scan(&latest_id)
+	return latest_id, err
+}
+
 const getMessageWriteLock = `-- name: GetMessageWriteLock :one
 SELECT recipient, message_type, current_message_id
 FROM message_write_lock
@@ -136,7 +162,7 @@ SELECT recipient, id, created, created_by, updated, is_read, payload
 FROM inbox_message
 WHERE recipient = $1
       AND id > $2
-ORDER BY id DESC
+ORDER BY id ASC
 LIMIT $3::bigint
 `
 
@@ -222,7 +248,7 @@ SELECT recipient, id, type, created, created_by, doc_uuid, doc_type, payload
 FROM message
 WHERE recipient = $1
       AND id > $2
-ORDER BY id DESC
+ORDER BY id ASC
 LIMIT $3::bigint
 `
 

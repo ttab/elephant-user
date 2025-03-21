@@ -79,6 +79,18 @@ func (s *PGStore) OnInboxMessageUpdate(
 	})
 }
 
+// GetLatestInboxMessageID implements Store.
+func (s *PGStore) GetLatestInboxMessageID(
+	ctx context.Context, recipient string,
+) (int64, error) {
+	id, err := s.q.GetLatestInboxMessageId(ctx, recipient)
+	if err != nil {
+		return -1, fmt.Errorf("get latest message id: %w", err)
+	}
+
+	return id, nil
+}
+
 // ListInboxMessagesBeforeID implements Store.
 //
 //nolint:dupl
@@ -159,6 +171,18 @@ func (s *PGStore) ListInboxMessagesAfterID(
 	}
 
 	return res, nil
+}
+
+// GetLatestMessageID implements Store.
+func (s *PGStore) GetLatestMessageID(
+	ctx context.Context, recipient string,
+) (int64, error) {
+	id, err := s.q.GetLatestMessageId(ctx, recipient)
+	if err != nil {
+		return -1, fmt.Errorf("get latest message id: %w", err)
+	}
+
+	return id, nil
 }
 
 // ListMessagesAfterID implements Store.

@@ -60,6 +60,9 @@ type Store interface {
 		ctx context.Context, ch chan MessageEvent,
 		recipient string, afterID int64,
 	)
+	GetLatestInboxMessageID(
+		ctx context.Context, recipient string,
+	) (int64, error)
 	ListInboxMessagesBeforeID(
 		ctx context.Context, recipient string,
 		beforeID int64, size int64,
@@ -68,6 +71,9 @@ type Store interface {
 		ctx context.Context, recipient string,
 		afterID int64, size int64,
 	) ([]InboxMessage, error)
+	GetLatestMessageID(
+		ctx context.Context, recipient string,
+	) (int64, error)
 	ListMessagesAfterID(
 		ctx context.Context, recipient string,
 		afterID int64, size int64,
@@ -204,6 +210,16 @@ func (s *Service) PollInboxMessages(
 
 	limit := int64(10)
 
+	if req.AfterId == -1 {
+		latestID, err := s.store.GetLatestInboxMessageID(ctx, auth.Claims.Subject)
+		if err != nil {
+			return nil, twirp.InternalErrorf(
+				"get latest message id: %w", err)
+		}
+
+		req.AfterId = latestID
+	}
+
 	listMessages := func() ([]*user.InboxMessage, error) {
 		msgs, err := s.store.ListInboxMessagesAfterID(
 			ctx, auth.Claims.Subject, req.AfterId, limit,
@@ -243,7 +259,7 @@ func (s *Service) PollInboxMessages(
 
 	if len(msgs) > 0 {
 		return &user.PollInboxMessagesResponse{
-			LastId:   msgs[0].Id,
+			LastId:   msgs[len(msgs)-1].Id,
 			Messages: msgs,
 		}, nil
 	}
@@ -261,7 +277,7 @@ func (s *Service) PollInboxMessages(
 
 	lastID := req.AfterId
 	if len(msgs) > 0 {
-		lastID = msgs[0].Id
+		lastID = msgs[len(msgs)-1].Id
 	}
 
 	return &user.PollInboxMessagesResponse{
@@ -287,6 +303,16 @@ func (s *Service) PollMessages(
 	)
 
 	limit := int64(10)
+
+	if req.AfterId == -1 {
+		latestID, err := s.store.GetLatestMessageID(ctx, auth.Claims.Subject)
+		if err != nil {
+			return nil, twirp.InternalErrorf(
+				"get latest message id: %w", err)
+		}
+
+		req.AfterId = latestID
+	}
 
 	listMessages := func() ([]*user.Message, error) {
 		msgs, err := s.store.ListMessagesAfterID(
@@ -328,7 +354,7 @@ func (s *Service) PollMessages(
 
 	if len(msgs) > 0 {
 		return &user.PollMessagesResponse{
-			LastId:   msgs[0].Id,
+			LastId:   msgs[len(msgs)-1].Id,
 			Messages: msgs,
 		}, nil
 	}
@@ -346,7 +372,7 @@ func (s *Service) PollMessages(
 
 	lastID := req.AfterId
 	if len(msgs) > 0 {
-		lastID = msgs[0].Id
+		lastID = msgs[len(msgs)-1].Id
 	}
 
 	return &user.PollMessagesResponse{

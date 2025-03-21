@@ -18,6 +18,13 @@ type InboxMessage struct {
 	Payload   []byte
 }
 
+type JobLock struct {
+	Name      string
+	Holder    string
+	Touched   pgtype.Timestamptz
+	Iteration int64
+}
+
 type Message struct {
 	Recipient string
 	ID        int64

@@ -1,3 +1,8 @@
+-- name: GetLatestInboxMessageId :one
+SELECT MAX(id)::bigint AS latest_id
+FROM inbox_message
+WHERE recipient = @recipient;
+
 -- name: ListInboxMessagesBeforeId :many
 SELECT recipient, id, created, created_by, updated, is_read, payload
 FROM inbox_message
@@ -11,15 +16,20 @@ SELECT recipient, id, created, created_by, updated, is_read, payload
 FROM inbox_message
 WHERE recipient = @recipient
       AND id > @after_id
-ORDER BY id DESC
+ORDER BY id ASC
 LIMIT sqlc.arg('limit')::bigint;
+
+-- name: GetLatestMessageId :one
+SELECT MAX(id)::bigint AS latest_id
+FROM message
+WHERE recipient = @recipient;
 
 -- name: ListMessagesAfterId :many
 SELECT recipient, id, type, created, created_by, doc_uuid, doc_type, payload
 FROM message
 WHERE recipient = @recipient
       AND id > @after_id
-ORDER BY id DESC
+ORDER BY id ASC
 LIMIT sqlc.arg('limit')::bigint;
 
 -- name: GetMessageWriteLock :one
