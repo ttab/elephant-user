@@ -1,5 +1,5 @@
 -- name: GetLatestInboxMessageId :one
-SELECT MAX(id)::bigint AS latest_id
+SELECT COALESCE(MAX(id), 0)::bigint AS latest_id
 FROM inbox_message
 WHERE recipient = @recipient;
 
@@ -20,7 +20,7 @@ ORDER BY id ASC
 LIMIT sqlc.arg('limit')::bigint;
 
 -- name: GetLatestMessageId :one
-SELECT MAX(id)::bigint AS latest_id
+SELECT COALESCE(MAX(id), 0)::bigint AS latest_id
 FROM message
 WHERE recipient = @recipient;
 

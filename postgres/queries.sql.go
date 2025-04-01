@@ -48,7 +48,7 @@ func (q *Queries) DeleteOldMessages(ctx context.Context) error {
 }
 
 const getLatestInboxMessageId = `-- name: GetLatestInboxMessageId :one
-SELECT MAX(id)::bigint AS latest_id
+SELECT COALESCE(MAX(id), 0)::bigint AS latest_id
 FROM inbox_message
 WHERE recipient = $1
 `
@@ -61,7 +61,7 @@ func (q *Queries) GetLatestInboxMessageId(ctx context.Context, recipient string)
 }
 
 const getLatestMessageId = `-- name: GetLatestMessageId :one
-SELECT MAX(id)::bigint AS latest_id
+SELECT COALESCE(MAX(id), 0)::bigint AS latest_id
 FROM message
 WHERE recipient = $1
 `
