@@ -13,8 +13,6 @@ import (
 	"testing"
 
 	"github.com/golang-jwt/jwt/v5"
-	"github.com/google/go-cmp/cmp"
-	"github.com/google/go-cmp/cmp/cmpopts"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/ttab/elephant-api/newsdoc"
@@ -26,11 +24,6 @@ import (
 	"github.com/ttab/elephantine/test"
 	"github.com/ttab/eltest"
 	"github.com/twitchtv/twirp"
-)
-
-const (
-	createdField = "created"
-	updatedField = "updated"
 )
 
 func TestService(t *testing.T) {
@@ -51,7 +44,7 @@ func TestService(t *testing.T) {
 		},
 	})
 
-	ctx := test.Context(t)
+	ctx := t.Context()
 	authCtx, _ := twirp.WithHTTPRequestHeaders(ctx, http.Header{
 		"Authorization": []string{"Bearer " + token},
 	})
@@ -68,7 +61,8 @@ func TestService(t *testing.T) {
 		test.Must(t, err, "poll inbox messages")
 
 		test.TestMessageAgainstGolden(t, regenerate, polledInboxMessages1,
-			filepath.Join(testData, "poll_inbox_messages_1.json"), ignoreCommonTimestamps())
+			filepath.Join(testData, "poll_inbox_messages_1.json"),
+			test.IgnoreTimestamps{})
 	}()
 
 	_, err := eu.Messages.PushInboxMessage(authCtx, &user.PushInboxMessageRequest{
@@ -121,14 +115,16 @@ func TestService(t *testing.T) {
 	listedInboxMessages1, err := eu.Messages.ListInboxMessages(authCtx, &user.ListInboxMessagesRequest{})
 	test.Must(t, err, "list inbox messages")
 	test.TestMessageAgainstGolden(t, regenerate, listedInboxMessages1,
-		filepath.Join(testData, "list_inbox_messages_1.json"), ignoreCommonTimestamps())
+		filepath.Join(testData, "list_inbox_messages_1.json"),
+		test.IgnoreTimestamps{})
 
 	listedInboxMessages2, err := eu.Messages.ListInboxMessages(authCtx, &user.ListInboxMessagesRequest{
 		BeforeId: 3,
 	})
 	test.Must(t, err, "list inbox messages before id")
 	test.TestMessageAgainstGolden(t, regenerate, listedInboxMessages2,
-		filepath.Join(testData, "list_inbox_messages_2.json"), ignoreCommonTimestamps())
+		filepath.Join(testData, "list_inbox_messages_2.json"),
+		test.IgnoreTimestamps{})
 
 	_, err = eu.Messages.DeleteInboxMessage(authCtx, &user.DeleteInboxMessageRequest{
 		Id: 1,
@@ -138,7 +134,8 @@ func TestService(t *testing.T) {
 	listedInboxMessages3, err := eu.Messages.ListInboxMessages(authCtx, &user.ListInboxMessagesRequest{})
 	test.Must(t, err, "list inbox messages after deletion")
 	test.TestMessageAgainstGolden(t, regenerate, listedInboxMessages3,
-		filepath.Join(testData, "list_inbox_messages_3.json"), ignoreCommonTimestamps())
+		filepath.Join(testData, "list_inbox_messages_3.json"),
+		test.IgnoreTimestamps{})
 
 	// Messages
 
@@ -151,7 +148,8 @@ func TestService(t *testing.T) {
 		test.Must(t, err, "poll messages")
 
 		test.TestMessageAgainstGolden(t, regenerate, polledMessages1,
-			filepath.Join(testData, "poll_messages_1.json"), ignoreCommonTimestamps())
+			filepath.Join(testData, "poll_messages_1.json"),
+			test.IgnoreTimestamps{})
 	}()
 
 	_, err = eu.Messages.PushMessage(authCtx, &user.PushMessageRequest{
@@ -168,12 +166,6 @@ func TestService(t *testing.T) {
 	wg.Wait()
 }
 
-func ignoreCommonTimestamps() cmp.Option {
-	return cmpopts.IgnoreMapEntries(func(k string, _ interface{}) bool {
-		return k == createdField || k == updatedField
-	})
-}
-
 type TestElephantUser struct {
 	JWTKey   *ecdsa.PrivateKey
 	Messages user.Messages
@@ -182,7 +174,7 @@ type TestElephantUser struct {
 func (teu *TestElephantUser) AccessToken(t *testing.T, claims elephantine.JWTClaims) string {
 	t.Helper()
 
-	claims.RegisteredClaims.Issuer = "test"
+	claims.Issuer = "test"
 
 	token := jwt.NewWithClaims(jwt.SigningMethodES384, claims)
 
@@ -195,7 +187,7 @@ func (teu *TestElephantUser) AccessToken(t *testing.T, claims elephantine.JWTCla
 func startElepantUser(t *testing.T) TestElephantUser {
 	t.Helper()
 
-	ctx := test.Context(t)
+	ctx := t.Context()
 	logger := slog.New(test.NewLogHandler(t, slog.LevelInfo))
 
 	pgTestInstance := eltest.NewPostgres(t)
