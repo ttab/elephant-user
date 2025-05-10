@@ -51,6 +51,11 @@ func main() {
 				Value:   "postgres://elephant-user:pass@localhost/elephant-user",
 				EnvVars: []string{"PG_CONN_URI"},
 			},
+			&cli.StringSliceFlag{
+				Name:    "cors-host",
+				Usage:   "CORS hosts to allow, supports wildcards",
+				EnvVars: []string{"CORS_HOSTS"},
+			},
 		},
 	}
 
@@ -77,6 +82,7 @@ func runUser(c *cli.Context) error {
 		profileAddr  = c.String("profile-addr")
 		logLevel     = c.String("log-level")
 		pgConnString = c.String("pg-conn-uri")
+		corsHosts    = c.StringSlice("cors-host")
 	)
 
 	logger := elephantine.SetUpLogger(logLevel, os.Stdout)
@@ -128,7 +134,8 @@ func runUser(c *cli.Context) error {
 		return fmt.Errorf("create validator: %w", err)
 	}
 
-	server := elephantine.NewAPIServer(logger, addr, profileAddr)
+	server := elephantine.NewAPIServer(logger, addr, profileAddr,
+		elephantine.APIServerCORSHosts(corsHosts...))
 
 	service := internal.NewService(logger, store, validator)
 
