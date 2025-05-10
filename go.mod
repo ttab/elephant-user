@@ -4,13 +4,12 @@ go 1.24.3
 
 require (
 	github.com/golang-jwt/jwt/v5 v5.2.2
-	github.com/google/go-cmp v0.7.0
 	github.com/google/uuid v1.6.0
 	github.com/jackc/pgx/v5 v5.7.4
 	github.com/joho/godotenv v1.5.1
 	github.com/prometheus/client_golang v1.22.0
 	github.com/ttab/elephant-api v0.17.22
-	github.com/ttab/elephantine v0.18.0
+	github.com/ttab/elephantine v0.18.1
 	github.com/ttab/eltest v0.1.0
 	github.com/ttab/mage v0.8.0
 	github.com/ttab/newsdoc v0.7.3
@@ -59,6 +58,7 @@ require (
 	github.com/gobwas/glob v0.2.3 // indirect
 	github.com/goccy/go-json v0.10.4 // indirect
 	github.com/gogo/protobuf v1.3.2 // indirect
+	github.com/google/go-cmp v0.7.0 // indirect
 	github.com/google/shlex v0.0.0-20191202100458-e7afc7fbc510 // indirect
 	github.com/hashicorp/errwrap v1.1.0 // indirect
 	github.com/hashicorp/go-cleanhttp v0.5.2 // indirect
