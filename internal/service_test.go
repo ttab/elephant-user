@@ -174,8 +174,6 @@ type TestElephantUser struct {
 func (teu *TestElephantUser) AccessToken(t *testing.T, claims elephantine.JWTClaims) string {
 	t.Helper()
 
-	claims.Issuer = "test"
-
 	token := jwt.NewWithClaims(jwt.SigningMethodES384, claims)
 
 	ss, err := token.SignedString(teu.JWTKey)
@@ -217,7 +215,7 @@ func startElepantUser(t *testing.T) TestElephantUser {
 	jwtKey, err := ecdsa.GenerateKey(elliptic.P384(), rand.Reader)
 	test.Must(t, err, "create signing key")
 
-	auth := elephantine.NewStaticAuthInfoParser(jwtKey.PublicKey,
+	auth := elephantine.NewStaticAuthInfoParser(ctx, jwtKey.PublicKey,
 		elephantine.JWTAuthInfoParserOptions{
 			Issuer: "test",
 		})
