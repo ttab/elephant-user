@@ -49,7 +49,7 @@ func main() {
 			&cli.StringFlag{
 				Name:    "pg-conn-uri",
 				Value:   "postgres://elephant-user:pass@localhost/elephant-user",
-				EnvVars: []string{"PG_CONN_URI"},
+				EnvVars: []string{"PG_CONN_URI", "CONN_STRING"},
 			},
 			&cli.StringSliceFlag{
 				Name:    "cors-host",
