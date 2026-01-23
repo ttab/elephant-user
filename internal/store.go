@@ -276,7 +276,6 @@ func (s *PGStore) InsertInboxMessage(
 			IsRead:    message.IsRead,
 			Payload:   payload,
 		})
-
 		if err == nil {
 			break
 		}
@@ -364,7 +363,6 @@ func (s *PGStore) InsertMessage(
 			DocType:   pg.TextOrNull(message.DocType),
 			Payload:   payload,
 		})
-
 		if err == nil {
 			break
 		}
