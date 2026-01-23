@@ -210,7 +210,7 @@ func startElepantUser(t *testing.T) TestElephantUser {
 	validator, err := internal.NewValidator(ctx)
 	test.Must(t, err, "create validator")
 
-	apiServer := elephantine.NewTestAPIServer(t, logger)
+	apiServer, client := elephantine.NewTestAPIServer(t, logger)
 
 	jwtKey, err := ecdsa.GenerateKey(elliptic.P384(), rand.Reader)
 	test.Must(t, err, "create signing key")
@@ -233,7 +233,7 @@ func startElepantUser(t *testing.T) TestElephantUser {
 	})
 	test.Must(t, err, "run application")
 
-	messages := user.NewMessagesProtobufClient("http://"+apiServer.Addr(), http.DefaultClient)
+	messages := user.NewMessagesProtobufClient("http://"+apiServer.Addr(), client)
 
 	return TestElephantUser{
 		JWTKey:   jwtKey,

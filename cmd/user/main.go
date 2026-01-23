@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -15,7 +16,7 @@ import (
 	"github.com/ttab/elephant-user/internal"
 	"github.com/ttab/elephantine"
 	"github.com/ttab/elephantine/pg"
-	"github.com/urfave/cli/v2"
+	"github.com/urfave/cli/v3"
 )
 
 func main() {
@@ -33,35 +34,35 @@ func main() {
 		Flags: []cli.Flag{
 			&cli.StringFlag{
 				Name:    "addr",
-				EnvVars: []string{"ADDR"},
+				Sources: cli.EnvVars("ADDR"),
 				Value:   ":1080",
 			},
 			&cli.StringFlag{
 				Name:    "profile-addr",
-				EnvVars: []string{"PROFILE_ADDR"},
+				Sources: cli.EnvVars("PROFILE_ADDR"),
 				Value:   ":1081",
 			},
 			&cli.StringFlag{
 				Name:    "log-level",
-				EnvVars: []string{"LOG_LEVEL"},
+				Sources: cli.EnvVars("LOG_LEVEL"),
 				Value:   "debug",
 			},
 			&cli.StringFlag{
 				Name:    "pg-conn-uri",
 				Value:   "postgres://elephant-user:pass@localhost/elephant-user",
-				EnvVars: []string{"PG_CONN_URI", "CONN_STRING"},
+				Sources: cli.EnvVars("PG_CONN_URI", "CONN_STRING"),
 			},
 			&cli.StringSliceFlag{
 				Name:    "cors-host",
 				Usage:   "CORS hosts to allow, supports wildcards",
-				EnvVars: []string{"CORS_HOSTS"},
+				Sources: cli.EnvVars("CORS_HOSTS"),
 			},
 		},
 	}
 
 	runCmd.Flags = append(runCmd.Flags, elephantine.AuthenticationCLIFlags()...)
 
-	app := cli.App{
+	app := cli.Command{
 		Name:  "user",
 		Usage: "The Elephant user service",
 		Commands: []*cli.Command{
@@ -69,27 +70,27 @@ func main() {
 		},
 	}
 
-	if err := app.Run(os.Args); err != nil {
+	if err := app.Run(context.Background(), os.Args); err != nil {
 		slog.Error("failed to run application",
 			elephantine.LogKeyError, err)
 		os.Exit(1)
 	}
 }
 
-func runUser(c *cli.Context) error {
+func runUser(ctx context.Context, cmd *cli.Command) error {
 	var (
-		addr         = c.String("addr")
-		profileAddr  = c.String("profile-addr")
-		logLevel     = c.String("log-level")
-		pgConnString = c.String("pg-conn-uri")
-		corsHosts    = c.StringSlice("cors-host")
+		addr         = cmd.String("addr")
+		profileAddr  = cmd.String("profile-addr")
+		logLevel     = cmd.String("log-level")
+		pgConnString = cmd.String("pg-conn-uri")
+		corsHosts    = cmd.StringSlice("cors-host")
 	)
 
 	logger := elephantine.SetUpLogger(logLevel, os.Stdout)
 
 	defer func() {
 		if p := recover(); p != nil {
-			slog.ErrorContext(c.Context, "panic during setup",
+			slog.ErrorContext(ctx, "panic during setup",
 				elephantine.LogKeyError, p,
 				"stack", string(debug.Stack()),
 			)
@@ -98,7 +99,7 @@ func runUser(c *cli.Context) error {
 		}
 	}()
 
-	dbpool, err := pgxpool.New(c.Context, pgConnString)
+	dbpool, err := pgxpool.New(ctx, pgConnString)
 	if err != nil {
 		return fmt.Errorf("create connection pool: %w", err)
 	}
@@ -108,12 +109,12 @@ func runUser(c *cli.Context) error {
 		go dbpool.Close()
 	}()
 
-	err = dbpool.Ping(c.Context)
+	err = dbpool.Ping(ctx)
 	if err != nil {
 		return fmt.Errorf("connect to database: %w", err)
 	}
 
-	auth, err := elephantine.AuthenticationConfigFromCLI(c, nil, nil)
+	auth, err := elephantine.AuthenticationConfigFromCLI(ctx, cmd, nil)
 	if err != nil {
 		return fmt.Errorf("set up authentication: %w", err)
 	}
@@ -122,14 +123,14 @@ func runUser(c *cli.Context) error {
 
 	// Open a connection to the database and subscribes to all store notifications.
 	go pg.Subscribe(
-		c.Context, logger, dbpool,
+		ctx, logger, dbpool,
 		store.Messages,
 		store.InboxMessages,
 	)
 
-	go store.RunCleaner(c.Context, 12*time.Hour)
+	go store.RunCleaner(ctx, 12*time.Hour)
 
-	validator, err := internal.NewValidator(c.Context)
+	validator, err := internal.NewValidator(ctx)
 	if err != nil {
 		return fmt.Errorf("create validator: %w", err)
 	}
@@ -139,7 +140,7 @@ func runUser(c *cli.Context) error {
 
 	service := internal.NewService(logger, store, validator)
 
-	err = internal.Run(c.Context, internal.Parameters{
+	err = internal.Run(ctx, internal.Parameters{
 		Logger:         logger,
 		APIServer:      server,
 		AuthInfoParser: auth.AuthParser,
