@@ -9,13 +9,9 @@
       "attributes": {
         "title": {},
         "uri": {
-          "glob": [
-            "message://inbox/**"
-          ]
+          "glob": ["message://inbox/**"]
         }
       },
-      "meta": [],
-      "links": [],
       "content": [
         {
           "description": "Text block",
@@ -25,10 +21,7 @@
           "attributes": {
             "role": {
               "optional": true,
-              "enum": [
-                "heading-1",
-                "heading-2"
-              ]
+              "enum": ["heading-1","heading-2"]
             }
           },
           "data": {
@@ -47,26 +40,18 @@
       "elements": {
         "strong": {
           "attributes": {
-            "id": {
-              "optional": true
-            }
+            "id": {"optional": true}
           }
         },
         "em": {
           "attributes": {
-            "id": {
-              "optional": true
-            }
+            "id": {"optional": true}
           }
         },
         "a": {
           "attributes": {
-            "id": {
-              "optional": true
-            },
-            "href": {
-              "optional": true
-            }
+            "id": {"optional": true},
+            "href": {"optional": true}
           }
         }
       }
