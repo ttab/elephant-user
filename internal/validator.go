@@ -11,13 +11,13 @@ import (
 	"github.com/ttab/revisor"
 )
 
-//go:embed schema.json
-var schema []byte
+//go:embed schema_messages.json
+var schemaMessages []byte
 
 func NewValidator(_ context.Context) (*Validator, error) {
 	var local revisor.ConstraintSet
 
-	dec := json.NewDecoder(bytes.NewReader(schema))
+	dec := json.NewDecoder(bytes.NewReader(schemaMessages))
 
 	dec.DisallowUnknownFields()
 
