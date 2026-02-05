@@ -5,8 +5,165 @@
 package postgres
 
 import (
+	"database/sql/driver"
+	"fmt"
+
 	"github.com/jackc/pgx/v5/pgtype"
 )
+
+type EventType string
+
+const (
+	EventTypeUpdate EventType = "update"
+	EventTypeDelete EventType = "delete"
+)
+
+func (e *EventType) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = EventType(s)
+	case string:
+		*e = EventType(s)
+	default:
+		return fmt.Errorf("unsupported scan type for EventType: %T", src)
+	}
+	return nil
+}
+
+type NullEventType struct {
+	EventType EventType
+	Valid     bool // Valid is true if EventType is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullEventType) Scan(value interface{}) error {
+	if value == nil {
+		ns.EventType, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.EventType.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullEventType) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.EventType), nil
+}
+
+type ResourceKind string
+
+const (
+	ResourceKindDocument ResourceKind = "document"
+	ResourceKindProperty ResourceKind = "property"
+)
+
+func (e *ResourceKind) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = ResourceKind(s)
+	case string:
+		*e = ResourceKind(s)
+	default:
+		return fmt.Errorf("unsupported scan type for ResourceKind: %T", src)
+	}
+	return nil
+}
+
+type NullResourceKind struct {
+	ResourceKind ResourceKind
+	Valid        bool // Valid is true if ResourceKind is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullResourceKind) Scan(value interface{}) error {
+	if value == nil {
+		ns.ResourceKind, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.ResourceKind.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullResourceKind) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.ResourceKind), nil
+}
+
+type UserKind string
+
+const (
+	UserKindUser UserKind = "user"
+	UserKindUnit UserKind = "unit"
+	UserKindOrg  UserKind = "org"
+)
+
+func (e *UserKind) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = UserKind(s)
+	case string:
+		*e = UserKind(s)
+	default:
+		return fmt.Errorf("unsupported scan type for UserKind: %T", src)
+	}
+	return nil
+}
+
+type NullUserKind struct {
+	UserKind UserKind
+	Valid    bool // Valid is true if UserKind is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullUserKind) Scan(value interface{}) error {
+	if value == nil {
+		ns.UserKind, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.UserKind.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullUserKind) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.UserKind), nil
+}
+
+type Document struct {
+	Owner         string
+	Application   string
+	Type          string
+	Key           string
+	Version       int64
+	SchemaVersion string
+	Title         string
+	Created       pgtype.Timestamptz
+	Updated       pgtype.Timestamptz
+	UpdatedBy     string
+	Payload       []byte
+}
+
+type Eventlog struct {
+	ID           int64
+	Owner        string
+	Created      pgtype.Timestamptz
+	Type         EventType
+	ResourceKind ResourceKind
+	Application  string
+	DocumentType pgtype.Text
+	UpdatedBy    string
+	Key          string
+	Payload      []byte
+}
 
 type InboxMessage struct {
 	Recipient string
@@ -42,6 +199,15 @@ type MessageWriteLock struct {
 	CurrentMessageID pgtype.Int8
 }
 
+type Property struct {
+	Owner       string
+	Application string
+	Key         string
+	Value       string
+	Created     pgtype.Timestamptz
+	Updated     pgtype.Timestamptz
+}
+
 type SchemaVersion struct {
 	Version int32
 }
@@ -49,4 +215,5 @@ type SchemaVersion struct {
 type User struct {
 	Sub     string
 	Created pgtype.Timestamptz
+	Kind    UserKind
 }

@@ -242,6 +242,7 @@ func (s *PGStore) InsertInboxMessage(
 	err = q.UpsertUser(ctx, postgres.UpsertUserParams{
 		Sub:     message.Recipient,
 		Created: pg.Time(message.Created),
+		Kind:    postgres.UserKindUser,
 	})
 	if err != nil {
 		return fmt.Errorf("upsert user: %w", err)
@@ -328,6 +329,7 @@ func (s *PGStore) InsertMessage(
 	err = q.UpsertUser(ctx, postgres.UpsertUserParams{
 		Sub:     message.Recipient,
 		Created: pg.Time(message.Created),
+		Kind:    postgres.UserKindUser,
 	})
 	if err != nil {
 		return fmt.Errorf("upsert user: %w", err)
@@ -440,6 +442,162 @@ func notifyInboxMessageUpdated(
 	payload MessageEvent,
 ) error {
 	return pgNotify(ctx, q, NotifyChannelInboxMessageUpdate, payload)
+}
+
+func (s *PGStore) GetProperties(
+	ctx context.Context, owner string,
+	application string, keys []string,
+) ([]Property, error) {
+	rows, err := s.q.GetProperties(ctx, postgres.GetPropertiesParams{
+		Owner:       owner,
+		Application: pg.TextOrNull(application),
+		Keys:        keys,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("get properties: %w", err)
+	}
+
+	props := make([]Property, len(rows))
+
+	for i, r := range rows {
+		props[i] = Property{
+			Owner:       r.Owner,
+			Application: r.Application,
+			Key:         r.Key,
+			Value:       r.Value,
+			Created:     r.Created.Time,
+			Updated:     r.Updated.Time,
+		}
+	}
+
+	return props, nil
+}
+
+func (s *PGStore) SetProperties(
+	ctx context.Context, owner string,
+	updates []PropertyUpdate,
+) (outErr error) {
+	tx, err := s.dbpool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin transaction: %w", err)
+	}
+
+	defer pg.Rollback(tx, &outErr)
+
+	q := postgres.New(tx)
+
+	err = q.UpsertUser(ctx, postgres.UpsertUserParams{
+		Sub:     owner,
+		Created: pg.Time(time.Now()),
+		Kind:    postgres.UserKindUser,
+	})
+	if err != nil {
+		return fmt.Errorf("upsert user: %w", err)
+	}
+
+	for _, prop := range updates {
+		p, err := q.UpsertProperty(ctx, postgres.UpsertPropertyParams{
+			Owner:       owner,
+			Application: prop.Application,
+			Key:         prop.Key,
+			Value:       prop.Value,
+		})
+		if err != nil {
+			return fmt.Errorf("upsert property %s/%s: %w", prop.Application, prop.Key, err)
+		}
+
+		// TODO: Should the whole property be stored as payload?
+		payload := map[string]interface{}{
+			"owner":       p.Owner,
+			"application": p.Application,
+			"key":         p.Key,
+			"value":       p.Value,
+			"created":     p.Created.Time,
+			"updated":     p.Updated.Time,
+		}
+
+		payloadBytes, err := json.Marshal(payload)
+		if err != nil {
+			return fmt.Errorf("marshal payload: %w", err)
+		}
+
+		err = q.InsertEventLog(ctx, postgres.InsertEventLogParams{
+			Owner:        owner,
+			Type:         postgres.EventTypeUpdate,
+			ResourceKind: postgres.ResourceKindProperty,
+			Application:  prop.Application,
+			UpdatedBy:    owner,
+			Key:          prop.Key,
+			Payload:      payloadBytes,
+		})
+		if err != nil {
+			return fmt.Errorf("insert event log: %w", err)
+		}
+	}
+
+	err = tx.Commit(ctx)
+	if err != nil {
+		return fmt.Errorf("commit transaction: %w", err)
+	}
+
+	return nil
+}
+
+func (s *PGStore) DeleteProperties(
+	ctx context.Context, owner string,
+	deletes []PropertyDelete,
+) (outErr error) {
+	tx, err := s.dbpool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin transaction: %w", err)
+	}
+
+	defer pg.Rollback(tx, &outErr)
+
+	q := postgres.New(tx)
+
+	for _, prop := range deletes {
+		err := q.DeleteProperty(ctx, postgres.DeletePropertyParams{
+			Owner:       owner,
+			Application: prop.Application,
+			Key:         prop.Key,
+		})
+		if err != nil {
+			return fmt.Errorf("delete property %s/%s: %w", prop.Application, prop.Key, err)
+		}
+
+		// TODO: Should we store any payload?
+		payload := map[string]interface{}{
+			"owner":       owner,
+			"application": prop.Application,
+			"key":         prop.Key,
+		}
+
+		payloadBytes, err := json.Marshal(payload)
+		if err != nil {
+			return fmt.Errorf("marshal delete payload: %w", err)
+		}
+
+		err = q.InsertEventLog(ctx, postgres.InsertEventLogParams{
+			Owner:        owner,
+			Type:         postgres.EventTypeDelete,
+			ResourceKind: postgres.ResourceKindProperty,
+			Application:  prop.Application,
+			UpdatedBy:    owner,
+			Key:          prop.Key,
+			Payload:      payloadBytes,
+		})
+		if err != nil {
+			return fmt.Errorf("insert event log: %w", err)
+		}
+	}
+
+	err = tx.Commit(ctx)
+	if err != nil {
+		return fmt.Errorf("commit transaction: %w", err)
+	}
+
+	return nil
 }
 
 func pgNotify[T any](

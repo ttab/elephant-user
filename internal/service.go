@@ -51,6 +51,26 @@ const (
 	MessageTypeInbox  MessageType = "inbox"
 )
 
+type Property struct {
+	Owner       string
+	Application string
+	Key         string
+	Value       string
+	Created     time.Time
+	Updated     time.Time
+}
+
+type PropertyUpdate struct {
+	Application string
+	Key         string
+	Value       string
+}
+
+type PropertyDelete struct {
+	Application string
+	Key         string
+}
+
 type Store interface {
 	OnMessageUpdate(
 		ctx context.Context, ch chan MessageEvent,
@@ -91,6 +111,18 @@ type Store interface {
 	DeleteInboxMessage(
 		ctx context.Context, recipient string, id int64,
 	) error
+	GetProperties(
+		ctx context.Context, owner string,
+		application string, keys []string,
+	) ([]Property, error)
+	SetProperties(
+		ctx context.Context, owner string,
+		updates []PropertyUpdate,
+	) error
+	DeleteProperties(
+		ctx context.Context, owner string,
+		deletes []PropertyDelete,
+	) error
 }
 
 type DocumentValidator interface {
@@ -119,6 +151,122 @@ func NewService(
 // Interface guard.
 var _ user.Messages = &Service{}
 
+// GetDocument implements [user.Settings].
+func (s *Service) GetDocument(
+	context.Context, *user.GetDocumentRequest,
+) (*user.GetDocumentResponse, error) {
+	panic("unimplemented")
+}
+
+// ListDocuments implements [user.Settings].
+func (s *Service) ListDocuments(
+	context.Context, *user.ListDocumentsRequest,
+) (*user.ListDocumentsResponse, error) {
+	panic("unimplemented")
+}
+
+// UpdateDocument implements [user.Settings].
+func (s *Service) UpdateDocument(
+	context.Context, *user.UpdateDocumentRequest,
+) (*user.UpdateDocumentResponse, error) {
+	panic("unimplemented")
+}
+
+// DeleteDocument implements [user.Settings].
+func (s *Service) DeleteDocument(
+	context.Context, *user.DeleteDocumentRequest,
+) (*user.DeleteDocumentResponse, error) {
+	panic("unimplemented")
+}
+
+// GetProperties implements [user.Settings].
+func (s *Service) GetProperties(
+	ctx context.Context, req *user.GetPropertiesRequest,
+) (*user.GetPropertiesResponse, error) {
+	auth, err := elephantine.RequireAnyScope(ctx, ScopeUser)
+	if err != nil {
+		return nil, err //nolint:wrapcheck
+	}
+
+	props, err := s.store.GetProperties(ctx, auth.Claims.Subject, req.Application, req.Keys)
+	if err != nil {
+		return nil, twirp.InternalErrorf("get properties: %w", err)
+	}
+
+	var res user.GetPropertiesResponse
+
+	for i := range props {
+		res.Properties = append(res.Properties, &user.Property{
+			Owner:       props[i].Owner,
+			Application: props[i].Application,
+			Key:         props[i].Key,
+			Value:       props[i].Value,
+			Created:     props[i].Created.Format(time.RFC3339),
+			Updated:     props[i].Updated.Format(time.RFC3339),
+		})
+	}
+
+	return &res, nil
+}
+
+// SetProperties implements [user.Settings].
+func (s *Service) SetProperties(
+	ctx context.Context, req *user.SetPropertiesRequest,
+) (*user.SetPropertiesResponse, error) {
+	auth, err := elephantine.RequireAnyScope(ctx, ScopeUser)
+	if err != nil {
+		return nil, err //nolint:wrapcheck
+	}
+
+	updates := make([]PropertyUpdate, len(req.Properties))
+	for i, p := range req.Properties {
+		updates[i] = PropertyUpdate{
+			Application: p.Application,
+			Key:         p.Key,
+			Value:       p.Value,
+		}
+	}
+
+	err = s.store.SetProperties(ctx, auth.Claims.Subject, updates)
+	if err != nil {
+		return nil, twirp.InternalErrorf("set properties: %w", err)
+	}
+
+	return &user.SetPropertiesResponse{}, nil
+}
+
+// DeleteProperties implements [user.Settings].
+func (s *Service) DeleteProperties(
+	ctx context.Context, req *user.DeletePropertiesRequest,
+) (*user.DeletePropertiesResponse, error) {
+	auth, err := elephantine.RequireAnyScope(ctx, ScopeUser)
+	if err != nil {
+		return nil, err //nolint:wrapcheck
+	}
+
+	deletes := make([]PropertyDelete, len(req.Properties))
+	for i, p := range req.Properties {
+		deletes[i] = PropertyDelete{
+			Application: p.Application,
+			Key:         p.Key,
+		}
+	}
+
+	err = s.store.DeleteProperties(ctx, auth.Claims.Subject, deletes)
+	if err != nil {
+		return nil, twirp.InternalErrorf("delete properties: %w", err)
+	}
+
+	return &user.DeletePropertiesResponse{}, nil
+}
+
+// PollEventLog implements [user.Settings].
+func (s *Service) PollEventLog(
+	context.Context, *user.PollEventLogRequest,
+) (*user.PollEventLogResponse, error) {
+	panic("unimplemented")
+}
+
 // DeleteInboxMessage implements user.Messages.
 func (s *Service) DeleteInboxMessage(
 	ctx context.Context, req *user.DeleteInboxMessageRequest,
@@ -137,7 +285,7 @@ func (s *Service) DeleteInboxMessage(
 		ctx, auth.Claims.Subject, req.Id,
 	)
 	if err != nil {
-		return nil, twirp.InternalError("delete inbox message")
+		return nil, twirp.InternalErrorf("delete inbox message: %w", err)
 	}
 
 	return &user.DeleteInboxMessageResponse{}, nil
@@ -503,7 +651,7 @@ func (s *Service) UpdateInboxMessage(
 		ctx, auth.Claims.Subject, req.Id, req.IsRead,
 	)
 	if err != nil {
-		return nil, twirp.InternalError("update inbox message")
+		return nil, twirp.InternalErrorf("update inbox message: %w", err)
 	}
 
 	return &user.UpdateInboxMessageResponse{}, nil

@@ -46,8 +46,8 @@ INSERT INTO message_write_lock(
       @recipient, @message_type, @current_message_id
 )
 ON CONFLICT(recipient, message_type)
-DO UPDATE
-SET current_message_id = EXCLUDED.current_message_id;
+DO UPDATE SET
+  current_message_id = EXCLUDED.current_message_id;
 
 -- name: InsertInboxMessage :exec
 INSERT INTO inbox_message(
@@ -65,9 +65,9 @@ INSERT INTO message(
 
 -- name: UpsertUser :exec
 INSERT INTO "user"(
-      sub, created
+      sub, created, kind
 ) VALUES (
-      @sub, @created
+      @sub, @created, @kind
 )
 ON CONFLICT (sub)
 DO NOTHING;
@@ -93,3 +93,44 @@ WHERE created < now() - INTERVAL '6 months';
 -- name: DeleteOldMessages :exec
 DELETE FROM message
 WHERE created < now() - INTERVAL '2 weeks';
+
+-- name: GetProperties :many
+SELECT owner, application, key, value, created, updated
+FROM property
+WHERE owner = @owner
+      AND (sqlc.narg('application')::text IS NULL OR application = sqlc.narg('application')::text)
+      AND (sqlc.slice('keys')::text[] IS NULL OR key = ANY(sqlc.slice('keys')::text[]));
+
+-- name: UpsertProperty :one
+INSERT INTO property (
+      owner, application, key, value, updated
+) VALUES (
+      @owner, @application, @key, @value, now()
+)
+ON CONFLICT (owner, application, key)
+DO UPDATE SET
+  value = EXCLUDED.value,
+  updated = now()
+RETURNING *;
+
+-- name: DeleteProperty :exec
+DELETE FROM property
+WHERE owner = @owner
+      AND application = @application
+      AND key = @key;
+
+-- name: InsertEventLog :exec
+INSERT INTO eventlog (
+  owner, created, type, resource_kind, application, 
+  document_type, updated_by, key, payload
+) VALUES (
+  @owner,
+  now(), -- created
+  @type, -- type (update/delete)
+  @resource_kind, -- resource_kind (document/property)
+  @application,
+  @document_type, -- document_type (empty for properties)
+  @updated_by,
+  @key,
+  @payload
+);

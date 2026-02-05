@@ -47,6 +47,24 @@ func (q *Queries) DeleteOldMessages(ctx context.Context) error {
 	return err
 }
 
+const deleteProperty = `-- name: DeleteProperty :exec
+DELETE FROM property
+WHERE owner = $1
+      AND application = $2
+      AND key = $3
+`
+
+type DeletePropertyParams struct {
+	Owner       string
+	Application string
+	Key         string
+}
+
+func (q *Queries) DeleteProperty(ctx context.Context, arg DeletePropertyParams) error {
+	_, err := q.db.Exec(ctx, deleteProperty, arg.Owner, arg.Application, arg.Key)
+	return err
+}
+
 const getLatestInboxMessageId = `-- name: GetLatestInboxMessageId :one
 SELECT COALESCE(MAX(id), 0)::bigint AS latest_id
 FROM inbox_message
@@ -91,6 +109,89 @@ func (q *Queries) GetMessageWriteLock(ctx context.Context, arg GetMessageWriteLo
 	var i MessageWriteLock
 	err := row.Scan(&i.Recipient, &i.MessageType, &i.CurrentMessageID)
 	return i, err
+}
+
+const getProperties = `-- name: GetProperties :many
+SELECT owner, application, key, value, created, updated
+FROM property
+WHERE owner = $1
+      AND ($2::text IS NULL OR application = $2::text)
+      AND ($3::text[] IS NULL OR key = ANY($3::text[]))
+`
+
+type GetPropertiesParams struct {
+	Owner       string
+	Application pgtype.Text
+	Keys        []string
+}
+
+func (q *Queries) GetProperties(ctx context.Context, arg GetPropertiesParams) ([]Property, error) {
+	rows, err := q.db.Query(ctx, getProperties, arg.Owner, arg.Application, arg.Keys)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Property
+	for rows.Next() {
+		var i Property
+		if err := rows.Scan(
+			&i.Owner,
+			&i.Application,
+			&i.Key,
+			&i.Value,
+			&i.Created,
+			&i.Updated,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const insertEventLog = `-- name: InsertEventLog :exec
+INSERT INTO eventlog (
+  owner, created, type, resource_kind, application, 
+  document_type, updated_by, key, payload
+) VALUES (
+  $1,
+  now(), -- created
+  $2, -- type (update/delete)
+  $3, -- resource_kind (document/property)
+  $4,
+  $5, -- document_type (empty for properties)
+  $6,
+  $7,
+  $8
+)
+`
+
+type InsertEventLogParams struct {
+	Owner        string
+	Type         EventType
+	ResourceKind ResourceKind
+	Application  string
+	DocumentType pgtype.Text
+	UpdatedBy    string
+	Key          string
+	Payload      []byte
+}
+
+func (q *Queries) InsertEventLog(ctx context.Context, arg InsertEventLogParams) error {
+	_, err := q.db.Exec(ctx, insertEventLog,
+		arg.Owner,
+		arg.Type,
+		arg.ResourceKind,
+		arg.Application,
+		arg.DocumentType,
+		arg.UpdatedBy,
+		arg.Key,
+		arg.Payload,
+	)
+	return err
 }
 
 const insertInboxMessage = `-- name: InsertInboxMessage :exec
@@ -326,8 +427,8 @@ INSERT INTO message_write_lock(
       $1, $2, $3
 )
 ON CONFLICT(recipient, message_type)
-DO UPDATE
-SET current_message_id = EXCLUDED.current_message_id
+DO UPDATE SET
+  current_message_id = EXCLUDED.current_message_id
 `
 
 type UpsertMessageWriteLockParams struct {
@@ -341,11 +442,50 @@ func (q *Queries) UpsertMessageWriteLock(ctx context.Context, arg UpsertMessageW
 	return err
 }
 
+const upsertProperty = `-- name: UpsertProperty :one
+INSERT INTO property (
+      owner, application, key, value, updated
+) VALUES (
+      $1, $2, $3, $4, now()
+)
+ON CONFLICT (owner, application, key)
+DO UPDATE SET
+  value = EXCLUDED.value,
+  updated = now()
+RETURNING owner, application, key, value, created, updated
+`
+
+type UpsertPropertyParams struct {
+	Owner       string
+	Application string
+	Key         string
+	Value       string
+}
+
+func (q *Queries) UpsertProperty(ctx context.Context, arg UpsertPropertyParams) (Property, error) {
+	row := q.db.QueryRow(ctx, upsertProperty,
+		arg.Owner,
+		arg.Application,
+		arg.Key,
+		arg.Value,
+	)
+	var i Property
+	err := row.Scan(
+		&i.Owner,
+		&i.Application,
+		&i.Key,
+		&i.Value,
+		&i.Created,
+		&i.Updated,
+	)
+	return i, err
+}
+
 const upsertUser = `-- name: UpsertUser :exec
 INSERT INTO "user"(
-      sub, created
+      sub, created, kind
 ) VALUES (
-      $1, $2
+      $1, $2, $3
 )
 ON CONFLICT (sub)
 DO NOTHING
@@ -354,9 +494,10 @@ DO NOTHING
 type UpsertUserParams struct {
 	Sub     string
 	Created pgtype.Timestamptz
+	Kind    UserKind
 }
 
 func (q *Queries) UpsertUser(ctx context.Context, arg UpsertUserParams) error {
-	_, err := q.db.Exec(ctx, upsertUser, arg.Sub, arg.Created)
+	_, err := q.db.Exec(ctx, upsertUser, arg.Sub, arg.Created, arg.Kind)
 	return err
 }
