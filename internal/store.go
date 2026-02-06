@@ -496,7 +496,7 @@ func (s *PGStore) SetProperties(
 	}
 
 	for _, prop := range updates {
-		p, err := q.UpsertProperty(ctx, postgres.UpsertPropertyParams{
+		err := q.UpsertProperty(ctx, postgres.UpsertPropertyParams{
 			Owner:       owner,
 			Application: prop.Application,
 			Key:         prop.Key,
@@ -506,21 +506,6 @@ func (s *PGStore) SetProperties(
 			return fmt.Errorf("upsert property %s/%s: %w", prop.Application, prop.Key, err)
 		}
 
-		// TODO: Should the whole property be stored as payload?
-		payload := map[string]interface{}{
-			"owner":       p.Owner,
-			"application": p.Application,
-			"key":         p.Key,
-			"value":       p.Value,
-			"created":     p.Created.Time,
-			"updated":     p.Updated.Time,
-		}
-
-		payloadBytes, err := json.Marshal(payload)
-		if err != nil {
-			return fmt.Errorf("marshal payload: %w", err)
-		}
-
 		err = q.InsertEventLog(ctx, postgres.InsertEventLogParams{
 			Owner:        owner,
 			Type:         postgres.EventTypeUpdate,
@@ -528,7 +513,7 @@ func (s *PGStore) SetProperties(
 			Application:  prop.Application,
 			UpdatedBy:    owner,
 			Key:          prop.Key,
-			Payload:      payloadBytes,
+			Payload:      nil,
 		})
 		if err != nil {
 			return fmt.Errorf("insert event log: %w", err)
@@ -566,18 +551,6 @@ func (s *PGStore) DeleteProperties(
 			return fmt.Errorf("delete property %s/%s: %w", prop.Application, prop.Key, err)
 		}
 
-		// TODO: Should we store any payload?
-		payload := map[string]interface{}{
-			"owner":       owner,
-			"application": prop.Application,
-			"key":         prop.Key,
-		}
-
-		payloadBytes, err := json.Marshal(payload)
-		if err != nil {
-			return fmt.Errorf("marshal delete payload: %w", err)
-		}
-
 		err = q.InsertEventLog(ctx, postgres.InsertEventLogParams{
 			Owner:        owner,
 			Type:         postgres.EventTypeDelete,
@@ -585,7 +558,7 @@ func (s *PGStore) DeleteProperties(
 			Application:  prop.Application,
 			UpdatedBy:    owner,
 			Key:          prop.Key,
-			Payload:      payloadBytes,
+			Payload:      nil,
 		})
 		if err != nil {
 			return fmt.Errorf("insert event log: %w", err)

@@ -442,7 +442,7 @@ func (q *Queries) UpsertMessageWriteLock(ctx context.Context, arg UpsertMessageW
 	return err
 }
 
-const upsertProperty = `-- name: UpsertProperty :one
+const upsertProperty = `-- name: UpsertProperty :exec
 INSERT INTO property (
       owner, application, key, value, updated
 ) VALUES (
@@ -452,7 +452,6 @@ ON CONFLICT (owner, application, key)
 DO UPDATE SET
   value = EXCLUDED.value,
   updated = now()
-RETURNING owner, application, key, value, created, updated
 `
 
 type UpsertPropertyParams struct {
@@ -462,23 +461,14 @@ type UpsertPropertyParams struct {
 	Value       string
 }
 
-func (q *Queries) UpsertProperty(ctx context.Context, arg UpsertPropertyParams) (Property, error) {
-	row := q.db.QueryRow(ctx, upsertProperty,
+func (q *Queries) UpsertProperty(ctx context.Context, arg UpsertPropertyParams) error {
+	_, err := q.db.Exec(ctx, upsertProperty,
 		arg.Owner,
 		arg.Application,
 		arg.Key,
 		arg.Value,
 	)
-	var i Property
-	err := row.Scan(
-		&i.Owner,
-		&i.Application,
-		&i.Key,
-		&i.Value,
-		&i.Created,
-		&i.Updated,
-	)
-	return i, err
+	return err
 }
 
 const upsertUser = `-- name: UpsertUser :exec

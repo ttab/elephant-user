@@ -101,7 +101,7 @@ WHERE owner = @owner
       AND (sqlc.narg('application')::text IS NULL OR application = sqlc.narg('application')::text)
       AND (sqlc.slice('keys')::text[] IS NULL OR key = ANY(sqlc.slice('keys')::text[]));
 
--- name: UpsertProperty :one
+-- name: UpsertProperty :exec
 INSERT INTO property (
       owner, application, key, value, updated
 ) VALUES (
@@ -110,8 +110,7 @@ INSERT INTO property (
 ON CONFLICT (owner, application, key)
 DO UPDATE SET
   value = EXCLUDED.value,
-  updated = now()
-RETURNING *;
+  updated = now();
 
 -- name: DeleteProperty :exec
 DELETE FROM property
