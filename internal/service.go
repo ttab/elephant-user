@@ -2,6 +2,8 @@ package internal
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strconv"
@@ -50,6 +52,31 @@ const (
 	MessageTypeSystem MessageType = "system"
 	MessageTypeInbox  MessageType = "inbox"
 )
+
+type Document struct {
+	Owner         string
+	Application   string
+	Type          string
+	Key           string
+	Version       int64
+	SchemaVersion string
+	Title         string
+	Created       time.Time
+	Updated       time.Time
+	UpdatedBy     string
+	Payload       []byte
+}
+
+type DocumentUpdate struct {
+	Owner         string
+	Application   string
+	Type          string
+	Key           string
+	SchemaVersion string
+	Title         string
+	UpdatedBy     string
+	Payload       []byte
+}
 
 type Property struct {
 	Owner       string
@@ -111,6 +138,21 @@ type Store interface {
 	DeleteInboxMessage(
 		ctx context.Context, recipient string, id int64,
 	) error
+	GetDocument(
+		ctx context.Context, owner string, application string,
+		docType string, key string,
+	) (*Document, error)
+	ListDocuments(
+		ctx context.Context, owner string, application string,
+		docType string, includePayload bool,
+	) ([]*Document, error)
+	UpdateDocument(
+		ctx context.Context, update DocumentUpdate,
+	) error
+	DeleteDocument(
+		ctx context.Context, owner string, application string,
+		docType string, key string,
+	) error
 	GetProperties(
 		ctx context.Context, owner string,
 		application string, keys []string,
@@ -153,30 +195,193 @@ var _ user.Messages = &Service{}
 
 // GetDocument implements [user.Settings].
 func (s *Service) GetDocument(
-	context.Context, *user.GetDocumentRequest,
+	ctx context.Context, req *user.GetDocumentRequest,
 ) (*user.GetDocumentResponse, error) {
-	panic("unimplemented")
+	auth, err := elephantine.RequireAnyScope(ctx, ScopeUser)
+	if err != nil {
+		return nil, err //nolint:wrapcheck
+	}
+
+	targetOwner := auth.Claims.Subject
+	if req.Owner != "" {
+		// TODO: Add logic to check if `sub` is allowed to read req.Owner's docs.
+		targetOwner = req.Owner
+	}
+
+	doc, err := s.store.GetDocument(ctx, targetOwner, req.Application, req.Type, req.Key)
+	if errors.Is(err, ErrDocNotFound) {
+		return nil, twirp.NotFoundError("no such document")
+	} else if err != nil {
+		return nil, twirp.InternalErrorf("get document: %w", err)
+	}
+
+	var newsdoc newsdoc_rpc.Document
+
+	err = json.Unmarshal(doc.Payload, &newsdoc)
+	if err != nil {
+		return nil, fmt.Errorf("unmarshal payload: %w", err)
+	}
+
+	return &user.GetDocumentResponse{
+		Document: &user.Document{
+			Owner:       doc.Owner,
+			Application: doc.Application,
+			Type:        doc.Type,
+			Key:         doc.Key,
+			Version:     doc.Version,
+			// TODO: Admins will be able to edit all documents.
+			ReadOnly:      doc.Owner != auth.Claims.Subject,
+			SchemaVersion: doc.SchemaVersion,
+			Title:         doc.Title,
+			Created:       doc.Created.Format(time.RFC3339),
+			Updated:       doc.Updated.Format(time.RFC3339),
+			UpdatedBy:     doc.UpdatedBy,
+			Payload:       &newsdoc,
+		},
+	}, nil
 }
 
 // ListDocuments implements [user.Settings].
 func (s *Service) ListDocuments(
-	context.Context, *user.ListDocumentsRequest,
+	ctx context.Context, req *user.ListDocumentsRequest,
 ) (*user.ListDocumentsResponse, error) {
-	panic("unimplemented")
+	auth, err := elephantine.RequireAnyScope(ctx, ScopeUser)
+	if err != nil {
+		return nil, err //nolint:wrapcheck
+	}
+
+	// TODO: Logic to list shared documents (where owner is org and user's units) would go here.
+
+	docs, err := s.store.ListDocuments(ctx,
+		auth.Claims.Subject, req.Application,
+		req.Type, req.IncludePayload,
+	)
+	if err != nil {
+		return nil, twirp.InternalErrorf("list documents: %w", err)
+	}
+
+	res := make([]*user.Document, len(docs))
+
+	for i, d := range docs {
+		var newsdoc newsdoc_rpc.Document
+
+		if req.IncludePayload && len(d.Payload) > 0 {
+			err = json.Unmarshal(docs[i].Payload, &newsdoc)
+			if err != nil {
+				return nil, fmt.Errorf("unmarshal payload: %w", err)
+			}
+		}
+
+		res[i] = &user.Document{
+			Owner:         d.Owner,
+			Application:   d.Application,
+			Type:          d.Type,
+			Key:           d.Key,
+			Version:       d.Version,
+			SchemaVersion: d.SchemaVersion,
+			// TODO: Admins will be able to edit all documents.
+			ReadOnly:  d.Owner != auth.Claims.Subject,
+			Title:     d.Title,
+			Created:   d.Created.Format(time.RFC3339),
+			Updated:   d.Updated.Format(time.RFC3339),
+			UpdatedBy: d.UpdatedBy,
+			Payload:   &newsdoc,
+		}
+	}
+
+	return &user.ListDocumentsResponse{
+		Documents: res,
+	}, nil
 }
 
 // UpdateDocument implements [user.Settings].
 func (s *Service) UpdateDocument(
-	context.Context, *user.UpdateDocumentRequest,
+	ctx context.Context, req *user.UpdateDocumentRequest,
 ) (*user.UpdateDocumentResponse, error) {
-	panic("unimplemented")
+	auth, err := elephantine.RequireAnyScope(ctx, ScopeUser)
+	if err != nil {
+		return nil, err //nolint:wrapcheck
+	}
+
+	targetOwner := auth.Claims.Subject
+	if req.Owner != "" {
+		// TODO: Add admin check here if targetOwner != `sub`.
+		targetOwner = req.Owner
+	}
+
+	if req.Payload == nil {
+		return nil, twirp.RequiredArgumentError("payload")
+	}
+
+	newsdoc := newsdoc_rpc.DocumentFromRPC(req.Payload)
+
+	// Add nil uuid.UUID to satisfy the validator.
+	newsdoc.UUID = uuid.UUID{}.String()
+
+	validationResult, err := s.validator.ValidateDocument(ctx, &newsdoc)
+	if err != nil {
+		return nil, fmt.Errorf("validate newsdoc payload: %w", err)
+	}
+
+	if len(validationResult) > 0 {
+		err := twirp.InvalidArgument.Errorf(
+			"the document had %d validation errors, the first one is: %v",
+			len(validationResult), validationResult[0].String())
+
+		err = err.WithMeta("err_count",
+			strconv.Itoa(len(validationResult)))
+
+		for i := range validationResult {
+			err = err.WithMeta(strconv.Itoa(i),
+				validationResult[i].String())
+		}
+
+		return nil, err
+	}
+
+	payload, err := json.Marshal(req.Payload)
+	if err != nil {
+		return nil, fmt.Errorf("marshal document payload: %w", err)
+	}
+
+	err = s.store.UpdateDocument(ctx, DocumentUpdate{
+		Owner:         targetOwner,
+		Application:   req.Application,
+		Type:          req.Type,
+		Key:           req.Key,
+		SchemaVersion: req.SchemaVersion,
+		Title:         newsdoc.Title,
+		UpdatedBy:     auth.Claims.Subject,
+		Payload:       payload,
+	})
+	if err != nil {
+		return nil, twirp.InternalErrorf("update document: %w", err)
+	}
+
+	return &user.UpdateDocumentResponse{}, nil
 }
 
 // DeleteDocument implements [user.Settings].
 func (s *Service) DeleteDocument(
-	context.Context, *user.DeleteDocumentRequest,
+	ctx context.Context, req *user.DeleteDocumentRequest,
 ) (*user.DeleteDocumentResponse, error) {
-	panic("unimplemented")
+	auth, err := elephantine.RequireAnyScope(ctx, ScopeUser)
+	if err != nil {
+		return nil, err //nolint:wrapcheck
+	}
+
+	targetOwner := auth.Claims.Subject
+	if req.Owner != "" {
+		// TODO: Add admin check here if targetOwner != `sub`.
+		targetOwner = req.Owner
+	}
+
+	err = s.store.DeleteDocument(ctx, targetOwner, req.Application, req.Type, req.Key)
+	if err != nil {
+		return nil, twirp.InternalErrorf("delete document: %w", err)
+	}
+
+	return &user.DeleteDocumentResponse{}, nil
 }
 
 // GetProperties implements [user.Settings].

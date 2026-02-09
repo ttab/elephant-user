@@ -1,0 +1,82 @@
+{
+  "version": 1,
+  "name": "tt-settings",
+  "documents": [
+    {
+      "name": "View setting",
+      "description": "Configuration for a user's view setting.",
+      "declares": "core/view-setting",
+      "attributes": {
+        "title": {}
+      },
+      "meta": [
+        {
+          "name": "Setting metadata",
+          "declares": {
+            "type": "core/view-setting"
+          },
+          "attributes": {
+            "role": {
+              "enum": ["filter", "sortorder"]
+            },
+            "kind": { "optional": true },
+            "value": { "optional": true },
+            "uuid": { "optional": true },
+            "uri": { "optional": true }
+          },
+          "data": {
+            "order": {
+              "name": "Sort order",
+              "enum": ["asc", "desc"],
+              "optional": true
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Wire panes setting",
+      "description": "Configuration for the user's wire pane setting.",
+      "declares": "core/wire-panes-setting",
+      "attributes": {
+        "title": {}
+      },
+      "content": [
+        {
+          "name": "Wire pane",
+          "declares": {
+            "type": "core/wire-pane"
+          },
+          "attributes": {
+            "uuid": {},
+            "title": {}
+          },
+          "meta": [
+            {
+              "name": "Setting metadata",
+              "declares": {
+                "type": "core/wire-pane"
+              },
+              "attributes": {
+                "role": {
+                  "enum": ["filter", "sortorder"]
+                },
+                "kind": { "optional": true },
+                "value": { "optional": true },
+                "uuid": { "optional": true },
+                "uri": { "optional": true }
+              },
+              "data": {
+                "order": {
+                  "name": "Sort order",
+                  "enum": ["asc", "desc"],
+                  "optional": true
+                }
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

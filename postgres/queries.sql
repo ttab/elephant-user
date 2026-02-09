@@ -112,23 +112,78 @@ DO UPDATE SET
   value = EXCLUDED.value,
   updated = now();
 
--- name: DeleteProperty :exec
+-- name: DeleteProperty :one
 DELETE FROM property
 WHERE owner = @owner
       AND application = @application
+      AND key = @key
+RETURNING 1;
+
+-- name: GetDocument :one
+SELECT owner, application, type, key, version, schema_version,
+       title, created, updated, updated_by, payload
+FROM document
+WHERE owner = @owner
+      AND application = @application
+      AND type = @type
       AND key = @key;
+
+-- name: ListDocumentsMetadata :many
+SELECT owner, application, type, key, version, schema_version,
+       title, created, updated, updated_by
+FROM document
+WHERE owner = @owner
+      AND (sqlc.narg('application')::text IS NULL OR application = sqlc.narg('application')::text)
+      AND (sqlc.narg('type')::text IS NULL OR type = sqlc.narg('type')::text)
+ORDER BY application ASC, type ASC, key ASC;
+
+-- name: ListDocumentsFull :many
+SELECT owner, application, type, key, version, schema_version,
+       title, created, updated, updated_by, payload
+FROM document
+WHERE owner = @owner
+      AND (sqlc.narg('application')::text IS NULL OR application = sqlc.narg('application')::text)
+      AND (sqlc.narg('type')::text IS NULL OR type = sqlc.narg('type')::text)
+ORDER BY application ASC, type ASC, key ASC;
+
+-- name: UpsertDocument :exec
+INSERT INTO document (
+      owner, application, type, key,
+      version, schema_version, title, created,
+      updated, updated_by, payload
+) VALUES (
+      @owner, @application, @type, @key,
+      1, @schema_version, @title, now(),
+      now(), @updated_by, @payload
+)
+ON CONFLICT (owner, application, type, key)
+DO UPDATE SET
+  version = document.version + 1,
+  schema_version = EXCLUDED.schema_version,
+  title = EXCLUDED.title,
+  updated_by = EXCLUDED.updated_by,
+  updated = now(),
+  payload = EXCLUDED.payload;
+
+-- name: DeleteDocument :one
+DELETE FROM document
+WHERE owner = @owner
+      AND application = @application
+      AND type = @type
+      AND key = @key
+RETURNING 1;
 
 -- name: InsertEventLog :exec
 INSERT INTO eventlog (
-  owner, created, type, resource_kind, application, 
+  owner, created, type, resource_kind, application,
   document_type, updated_by, key, payload
 ) VALUES (
   @owner,
-  now(), -- created
+  now(),
   @type, -- type (update/delete)
   @resource_kind, -- resource_kind (document/property)
   @application,
-  @document_type, -- document_type (empty for properties)
+  @document_type, -- empty if resource_kind is 'property'
   @updated_by,
   @key,
   @payload

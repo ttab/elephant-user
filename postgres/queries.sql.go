@@ -11,6 +11,34 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const deleteDocument = `-- name: DeleteDocument :one
+DELETE FROM document
+WHERE owner = $1
+      AND application = $2
+      AND type = $3
+      AND key = $4
+RETURNING 1
+`
+
+type DeleteDocumentParams struct {
+	Owner       string
+	Application string
+	Type        string
+	Key         string
+}
+
+func (q *Queries) DeleteDocument(ctx context.Context, arg DeleteDocumentParams) (int32, error) {
+	row := q.db.QueryRow(ctx, deleteDocument,
+		arg.Owner,
+		arg.Application,
+		arg.Type,
+		arg.Key,
+	)
+	var column_1 int32
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
 const deleteInboxMessage = `-- name: DeleteInboxMessage :exec
 DELETE FROM inbox_message
 WHERE recipient = $1
@@ -47,11 +75,12 @@ func (q *Queries) DeleteOldMessages(ctx context.Context) error {
 	return err
 }
 
-const deleteProperty = `-- name: DeleteProperty :exec
+const deleteProperty = `-- name: DeleteProperty :one
 DELETE FROM property
 WHERE owner = $1
       AND application = $2
       AND key = $3
+RETURNING 1
 `
 
 type DeletePropertyParams struct {
@@ -60,9 +89,52 @@ type DeletePropertyParams struct {
 	Key         string
 }
 
-func (q *Queries) DeleteProperty(ctx context.Context, arg DeletePropertyParams) error {
-	_, err := q.db.Exec(ctx, deleteProperty, arg.Owner, arg.Application, arg.Key)
-	return err
+func (q *Queries) DeleteProperty(ctx context.Context, arg DeletePropertyParams) (int32, error) {
+	row := q.db.QueryRow(ctx, deleteProperty, arg.Owner, arg.Application, arg.Key)
+	var column_1 int32
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
+const getDocument = `-- name: GetDocument :one
+SELECT owner, application, type, key, version, schema_version,
+       title, created, updated, updated_by, payload
+FROM document
+WHERE owner = $1
+      AND application = $2
+      AND type = $3
+      AND key = $4
+`
+
+type GetDocumentParams struct {
+	Owner       string
+	Application string
+	Type        string
+	Key         string
+}
+
+func (q *Queries) GetDocument(ctx context.Context, arg GetDocumentParams) (Document, error) {
+	row := q.db.QueryRow(ctx, getDocument,
+		arg.Owner,
+		arg.Application,
+		arg.Type,
+		arg.Key,
+	)
+	var i Document
+	err := row.Scan(
+		&i.Owner,
+		&i.Application,
+		&i.Type,
+		&i.Key,
+		&i.Version,
+		&i.SchemaVersion,
+		&i.Title,
+		&i.Created,
+		&i.Updated,
+		&i.UpdatedBy,
+		&i.Payload,
+	)
+	return i, err
 }
 
 const getLatestInboxMessageId = `-- name: GetLatestInboxMessageId :one
@@ -154,15 +226,15 @@ func (q *Queries) GetProperties(ctx context.Context, arg GetPropertiesParams) ([
 
 const insertEventLog = `-- name: InsertEventLog :exec
 INSERT INTO eventlog (
-  owner, created, type, resource_kind, application, 
+  owner, created, type, resource_kind, application,
   document_type, updated_by, key, payload
 ) VALUES (
   $1,
-  now(), -- created
+  now(),
   $2, -- type (update/delete)
   $3, -- resource_kind (document/property)
   $4,
-  $5, -- document_type (empty for properties)
+  $5, -- empty if resource_kind is 'property'
   $6,
   $7,
   $8
@@ -256,6 +328,114 @@ func (q *Queries) InsertMessage(ctx context.Context, arg InsertMessageParams) er
 		arg.Payload,
 	)
 	return err
+}
+
+const listDocumentsFull = `-- name: ListDocumentsFull :many
+SELECT owner, application, type, key, version, schema_version,
+       title, created, updated, updated_by, payload
+FROM document
+WHERE owner = $1
+      AND ($2::text IS NULL OR application = $2::text)
+      AND ($3::text IS NULL OR type = $3::text)
+ORDER BY application ASC, type ASC, key ASC
+`
+
+type ListDocumentsFullParams struct {
+	Owner       string
+	Application pgtype.Text
+	Type        pgtype.Text
+}
+
+func (q *Queries) ListDocumentsFull(ctx context.Context, arg ListDocumentsFullParams) ([]Document, error) {
+	rows, err := q.db.Query(ctx, listDocumentsFull, arg.Owner, arg.Application, arg.Type)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Document
+	for rows.Next() {
+		var i Document
+		if err := rows.Scan(
+			&i.Owner,
+			&i.Application,
+			&i.Type,
+			&i.Key,
+			&i.Version,
+			&i.SchemaVersion,
+			&i.Title,
+			&i.Created,
+			&i.Updated,
+			&i.UpdatedBy,
+			&i.Payload,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listDocumentsMetadata = `-- name: ListDocumentsMetadata :many
+SELECT owner, application, type, key, version, schema_version,
+       title, created, updated, updated_by
+FROM document
+WHERE owner = $1
+      AND ($2::text IS NULL OR application = $2::text)
+      AND ($3::text IS NULL OR type = $3::text)
+ORDER BY application ASC, type ASC, key ASC
+`
+
+type ListDocumentsMetadataParams struct {
+	Owner       string
+	Application pgtype.Text
+	Type        pgtype.Text
+}
+
+type ListDocumentsMetadataRow struct {
+	Owner         string
+	Application   string
+	Type          string
+	Key           string
+	Version       int64
+	SchemaVersion string
+	Title         string
+	Created       pgtype.Timestamptz
+	Updated       pgtype.Timestamptz
+	UpdatedBy     string
+}
+
+func (q *Queries) ListDocumentsMetadata(ctx context.Context, arg ListDocumentsMetadataParams) ([]ListDocumentsMetadataRow, error) {
+	rows, err := q.db.Query(ctx, listDocumentsMetadata, arg.Owner, arg.Application, arg.Type)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListDocumentsMetadataRow
+	for rows.Next() {
+		var i ListDocumentsMetadataRow
+		if err := rows.Scan(
+			&i.Owner,
+			&i.Application,
+			&i.Type,
+			&i.Key,
+			&i.Version,
+			&i.SchemaVersion,
+			&i.Title,
+			&i.Created,
+			&i.Updated,
+			&i.UpdatedBy,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const listInboxMessagesAfterId = `-- name: ListInboxMessagesAfterId :many
@@ -417,6 +597,51 @@ type UpdateInboxMessageParams struct {
 
 func (q *Queries) UpdateInboxMessage(ctx context.Context, arg UpdateInboxMessageParams) error {
 	_, err := q.db.Exec(ctx, updateInboxMessage, arg.IsRead, arg.Recipient, arg.ID)
+	return err
+}
+
+const upsertDocument = `-- name: UpsertDocument :exec
+INSERT INTO document (
+      owner, application, type, key,
+      version, schema_version, title, created,
+      updated, updated_by, payload
+) VALUES (
+      $1, $2, $3, $4,
+      1, $5, $6, now(),
+      now(), $7, $8
+)
+ON CONFLICT (owner, application, type, key)
+DO UPDATE SET
+  version = document.version + 1,
+  schema_version = EXCLUDED.schema_version,
+  title = EXCLUDED.title,
+  updated_by = EXCLUDED.updated_by,
+  updated = now(),
+  payload = EXCLUDED.payload
+`
+
+type UpsertDocumentParams struct {
+	Owner         string
+	Application   string
+	Type          string
+	Key           string
+	SchemaVersion string
+	Title         string
+	UpdatedBy     string
+	Payload       []byte
+}
+
+func (q *Queries) UpsertDocument(ctx context.Context, arg UpsertDocumentParams) error {
+	_, err := q.db.Exec(ctx, upsertDocument,
+		arg.Owner,
+		arg.Application,
+		arg.Type,
+		arg.Key,
+		arg.SchemaVersion,
+		arg.Title,
+		arg.UpdatedBy,
+		arg.Payload,
+	)
 	return err
 }
 

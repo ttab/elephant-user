@@ -16,6 +16,8 @@ import (
 	"github.com/ttab/elephantine/pg"
 )
 
+var ErrDocNotFound = errors.New("document not found")
+
 type NotifyChannel = string
 
 const (
@@ -444,6 +446,202 @@ func notifyInboxMessageUpdated(
 	return pgNotify(ctx, q, NotifyChannelInboxMessageUpdate, payload)
 }
 
+func (s *PGStore) GetDocument(
+	ctx context.Context, owner string, application string,
+	docType string, key string,
+) (*Document, error) {
+	row, err := s.q.GetDocument(ctx, postgres.GetDocumentParams{
+		Owner:       owner,
+		Application: application,
+		Type:        docType,
+		Key:         key,
+	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrDocNotFound
+	} else if err != nil {
+		return nil, fmt.Errorf("get document: %w", err)
+	}
+
+	return &Document{
+		Owner:         row.Owner,
+		Application:   row.Application,
+		Type:          row.Type,
+		Key:           row.Key,
+		Title:         row.Title,
+		Version:       row.Version,
+		SchemaVersion: row.SchemaVersion,
+		Created:       row.Created.Time,
+		Updated:       row.Updated.Time,
+		UpdatedBy:     row.UpdatedBy,
+		Payload:       row.Payload,
+	}, nil
+}
+
+func (s *PGStore) ListDocuments(
+	ctx context.Context, owner string, application string,
+	docType string, includePayload bool,
+) ([]*Document, error) {
+	if includePayload {
+		rows, err := s.q.ListDocumentsFull(ctx, postgres.ListDocumentsFullParams{
+			Owner:       owner,
+			Application: pg.TextOrNull(application),
+			Type:        pg.TextOrNull(docType),
+		})
+		if err != nil {
+			return nil, fmt.Errorf("list full documents: %w", err)
+		}
+
+		docs := make([]*Document, len(rows))
+		for i, r := range rows {
+			docs[i] = &Document{
+				Owner:         r.Owner,
+				Application:   r.Application,
+				Type:          r.Type,
+				Key:           r.Key,
+				Version:       r.Version,
+				SchemaVersion: r.SchemaVersion,
+				Title:         r.Title,
+				Created:       r.Created.Time,
+				Updated:       r.Updated.Time,
+				UpdatedBy:     r.UpdatedBy,
+				Payload:       r.Payload,
+			}
+		}
+
+		return docs, nil
+	}
+
+	rows, err := s.q.ListDocumentsMetadata(ctx, postgres.ListDocumentsMetadataParams{
+		Owner:       owner,
+		Application: pg.TextOrNull(application),
+		Type:        pg.TextOrNull(docType),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("list documents metadata: %w", err)
+	}
+
+	docs := make([]*Document, len(rows))
+	for i, r := range rows {
+		docs[i] = &Document{
+			Owner:         r.Owner,
+			Application:   r.Application,
+			Type:          r.Type,
+			Key:           r.Key,
+			Version:       r.Version,
+			SchemaVersion: r.SchemaVersion,
+			Title:         r.Title,
+			Created:       r.Created.Time,
+			Updated:       r.Updated.Time,
+			UpdatedBy:     r.UpdatedBy,
+			Payload:       nil,
+		}
+	}
+
+	return docs, nil
+}
+
+func (s *PGStore) UpdateDocument(
+	ctx context.Context, update DocumentUpdate,
+) (outErr error) {
+	tx, err := s.dbpool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin transaction: %w", err)
+	}
+
+	defer pg.Rollback(tx, &outErr)
+
+	q := postgres.New(tx)
+
+	err = q.UpsertUser(ctx, postgres.UpsertUserParams{
+		Sub:     update.Owner,
+		Created: pg.Time(time.Now()),
+		Kind:    postgres.UserKindUser,
+	})
+	if err != nil {
+		return fmt.Errorf("upsert user: %w", err)
+	}
+
+	err = q.UpsertDocument(ctx, postgres.UpsertDocumentParams{
+		Owner:         update.Owner,
+		Application:   update.Application,
+		Type:          update.Type,
+		Key:           update.Key,
+		SchemaVersion: update.SchemaVersion,
+		Title:         update.Title,
+		Payload:       update.Payload,
+		UpdatedBy:     update.UpdatedBy,
+	})
+	if err != nil {
+		return fmt.Errorf("upsert document: %w", err)
+	}
+
+	err = q.InsertEventLog(ctx, postgres.InsertEventLogParams{
+		Owner:        update.Owner,
+		Type:         postgres.EventTypeUpdate,
+		ResourceKind: postgres.ResourceKindDocument,
+		Application:  update.Application,
+		DocumentType: pg.Text(update.Type),
+		Key:          update.Key,
+		UpdatedBy:    update.UpdatedBy,
+		Payload:      nil,
+	})
+	if err != nil {
+		return fmt.Errorf("insert event log: %w", err)
+	}
+
+	err = tx.Commit(ctx)
+	if err != nil {
+		return fmt.Errorf("commit transaction: %w", err)
+	}
+
+	return nil
+}
+
+func (s *PGStore) DeleteDocument(
+	ctx context.Context, owner string, application string,
+	docType string, key string,
+) (outErr error) {
+	tx, err := s.dbpool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin transaction: %w", err)
+	}
+
+	defer pg.Rollback(tx, &outErr)
+
+	q := postgres.New(tx)
+
+	_, err = q.DeleteDocument(ctx, postgres.DeleteDocumentParams{
+		Owner:       owner,
+		Application: application,
+		Type:        docType,
+		Key:         key,
+	})
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return fmt.Errorf("delete document: %w", err)
+	}
+
+	err = q.InsertEventLog(ctx, postgres.InsertEventLogParams{
+		Owner:        owner,
+		Type:         postgres.EventTypeDelete,
+		ResourceKind: postgres.ResourceKindDocument,
+		Application:  application,
+		DocumentType: pg.Text(docType),
+		Key:          key,
+		UpdatedBy:    owner,
+		Payload:      nil,
+	})
+	if err != nil {
+		return fmt.Errorf("insert event log: %w", err)
+	}
+
+	err = tx.Commit(ctx)
+	if err != nil {
+		return fmt.Errorf("commit transaction: %w", err)
+	}
+
+	return nil
+}
+
 func (s *PGStore) GetProperties(
 	ctx context.Context, owner string,
 	application string, keys []string,
@@ -542,12 +740,14 @@ func (s *PGStore) DeleteProperties(
 	q := postgres.New(tx)
 
 	for _, prop := range deletes {
-		err := q.DeleteProperty(ctx, postgres.DeletePropertyParams{
+		_, err := q.DeleteProperty(ctx, postgres.DeletePropertyParams{
 			Owner:       owner,
 			Application: prop.Application,
 			Key:         prop.Key,
 		})
-		if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			continue
+		} else if err != nil {
 			return fmt.Errorf("delete property %s/%s: %w", prop.Application, prop.Key, err)
 		}
 
