@@ -37,13 +37,14 @@ CREATE TYPE resource_kind AS ENUM ('document', 'property');
 CREATE TABLE IF NOT EXISTS eventlog (
   id bigint generated always as identity primary key,
   owner text not null,
-  created timestamptz not null default now(),
   type event_type NOT NULL,
   resource_kind resource_kind NOT NULL,
   application text NOT NULL,
   document_type text, -- empty if resource_kind is 'property'
-  updated_by text not null,
   key text not null,
+  version bigint,
+  updated_by text not null,
+  created timestamptz not null default now(),
   payload jsonb
 );
 

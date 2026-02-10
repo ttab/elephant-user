@@ -78,13 +78,14 @@ CREATE TABLE public.document (
 CREATE TABLE public.eventlog (
     id bigint NOT NULL,
     owner text NOT NULL,
-    created timestamp with time zone DEFAULT now() NOT NULL,
     type public.event_type NOT NULL,
     resource_kind public.resource_kind NOT NULL,
     application text NOT NULL,
     document_type text,
-    updated_by text NOT NULL,
     key text NOT NULL,
+    version bigint,
+    updated_by text NOT NULL,
+    created timestamp with time zone DEFAULT now() NOT NULL,
     payload jsonb
 );
 
