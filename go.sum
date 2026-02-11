@@ -191,10 +191,8 @@ github.com/stretchr/testify v1.3.0/go.mod h1:M5WIy9Dh21IEIfnGCwXGc5bZfKNJtfHm1UV
 github.com/stretchr/testify v1.7.0/go.mod h1:6Fq8oRcR53rry900zMqJjRRixrwX3KX962/h/Wwjteg=
 github.com/stretchr/testify v1.11.1 h1:7s2iGBzp5EwR7/aIZr8ao5+dra3wiQyKjjFuvgVKu7U=
 github.com/stretchr/testify v1.11.1/go.mod h1:wZwfW3scLgRK+23gO65QZefKpKQRnfz6sD981Nm4B6U=
-github.com/ttab/elephant-api v0.19.4 h1:1CNlUVospc1nZTUe/M5NWcFsv5eA/y+FhkWN119qq48=
-github.com/ttab/elephant-api v0.19.4/go.mod h1:2sd48dqSKazXhiPEpZyw648PWah0CUjDaQZ6MT48S4A=
-github.com/ttab/elephantine v0.23.6 h1:QHhjFObDn71C3U2jv8j+6a2TaT1/yBV+56Gacpg/+Gk=
-github.com/ttab/elephantine v0.23.6/go.mod h1:qN4ircUAfyve/qV2blbZKvCBfjIDAPChnBxixFRzZGQ=
+github.com/ttab/elephant-api v0.19.5-0.20260210114504-c11855dc6ee2 h1:9e1QO529eppzjG1sZeKov/Pr9KOT7hukO6t//mJ2N+8=
+github.com/ttab/elephant-api v0.19.5-0.20260210114504-c11855dc6ee2/go.mod h1:2sd48dqSKazXhiPEpZyw648PWah0CUjDaQZ6MT48S4A=
 github.com/ttab/elephantine v0.23.7 h1:ujP1pHHLkJk+93Da1gXj74bVAXQHJo7vlp21aihLZtY=
 github.com/ttab/elephantine v0.23.7/go.mod h1:qN4ircUAfyve/qV2blbZKvCBfjIDAPChnBxixFRzZGQ=
 github.com/ttab/eltest v0.1.0 h1:2Npbk43953k0IQN44N76yKZF0vbd0z9UNugzRQ1rREc=
