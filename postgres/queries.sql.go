@@ -141,20 +141,20 @@ const getEventLogEntriesAfterId = `-- name: GetEventLogEntriesAfterId :many
 SELECT id, owner, type, resource_kind, application, document_type,
        key, version, updated_by, created, payload
 FROM eventlog
-WHERE owner = $1
+WHERE owner = ANY($1::text[])
       AND id > $2
 ORDER BY id ASC
 LIMIT $3::bigint
 `
 
 type GetEventLogEntriesAfterIdParams struct {
-	Owner   string
+	Owners  []string
 	AfterID int64
 	Limit   int64
 }
 
 func (q *Queries) GetEventLogEntriesAfterId(ctx context.Context, arg GetEventLogEntriesAfterIdParams) ([]Eventlog, error) {
-	rows, err := q.db.Query(ctx, getEventLogEntriesAfterId, arg.Owner, arg.AfterID, arg.Limit)
+	rows, err := q.db.Query(ctx, getEventLogEntriesAfterId, arg.Owners, arg.AfterID, arg.Limit)
 	if err != nil {
 		return nil, err
 	}
@@ -188,11 +188,11 @@ func (q *Queries) GetEventLogEntriesAfterId(ctx context.Context, arg GetEventLog
 const getLatestEventLogId = `-- name: GetLatestEventLogId :one
 SELECT COALESCE(MAX(id), 0)::bigint
 FROM eventlog
-WHERE owner = $1
+WHERE owner = ANY($1::text[])
 `
 
-func (q *Queries) GetLatestEventLogId(ctx context.Context, owner string) (int64, error) {
-	row := q.db.QueryRow(ctx, getLatestEventLogId, owner)
+func (q *Queries) GetLatestEventLogId(ctx context.Context, owners []string) (int64, error) {
+	row := q.db.QueryRow(ctx, getLatestEventLogId, owners)
 	var column_1 int64
 	err := row.Scan(&column_1)
 	return column_1, err
@@ -401,20 +401,20 @@ const listDocumentsFull = `-- name: ListDocumentsFull :many
 SELECT owner, application, type, key, version, schema_version,
        title, created, updated, updated_by, payload
 FROM document
-WHERE owner = $1
+WHERE owner = ANY($1::text[])
       AND ($2::text IS NULL OR application = $2::text)
       AND ($3::text IS NULL OR type = $3::text)
 ORDER BY application ASC, type ASC, key ASC
 `
 
 type ListDocumentsFullParams struct {
-	Owner       string
+	Owners      []string
 	Application pgtype.Text
 	Type        pgtype.Text
 }
 
 func (q *Queries) ListDocumentsFull(ctx context.Context, arg ListDocumentsFullParams) ([]Document, error) {
-	rows, err := q.db.Query(ctx, listDocumentsFull, arg.Owner, arg.Application, arg.Type)
+	rows, err := q.db.Query(ctx, listDocumentsFull, arg.Owners, arg.Application, arg.Type)
 	if err != nil {
 		return nil, err
 	}
@@ -449,14 +449,14 @@ const listDocumentsMetadata = `-- name: ListDocumentsMetadata :many
 SELECT owner, application, type, key, version, schema_version,
        title, created, updated, updated_by
 FROM document
-WHERE owner = $1
+WHERE owner = ANY($1::text[])
       AND ($2::text IS NULL OR application = $2::text)
       AND ($3::text IS NULL OR type = $3::text)
 ORDER BY application ASC, type ASC, key ASC
 `
 
 type ListDocumentsMetadataParams struct {
-	Owner       string
+	Owners      []string
 	Application pgtype.Text
 	Type        pgtype.Text
 }
@@ -475,7 +475,7 @@ type ListDocumentsMetadataRow struct {
 }
 
 func (q *Queries) ListDocumentsMetadata(ctx context.Context, arg ListDocumentsMetadataParams) ([]ListDocumentsMetadataRow, error) {
-	rows, err := q.db.Query(ctx, listDocumentsMetadata, arg.Owner, arg.Application, arg.Type)
+	rows, err := q.db.Query(ctx, listDocumentsMetadata, arg.Owners, arg.Application, arg.Type)
 	if err != nil {
 		return nil, err
 	}

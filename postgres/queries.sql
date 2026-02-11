@@ -132,7 +132,7 @@ WHERE owner = @owner
 SELECT owner, application, type, key, version, schema_version,
        title, created, updated, updated_by
 FROM document
-WHERE owner = @owner
+WHERE owner = ANY(@owners::text[])
       AND (sqlc.narg('application')::text IS NULL OR application = sqlc.narg('application')::text)
       AND (sqlc.narg('type')::text IS NULL OR type = sqlc.narg('type')::text)
 ORDER BY application ASC, type ASC, key ASC;
@@ -141,7 +141,7 @@ ORDER BY application ASC, type ASC, key ASC;
 SELECT owner, application, type, key, version, schema_version,
        title, created, updated, updated_by, payload
 FROM document
-WHERE owner = @owner
+WHERE owner = ANY(@owners::text[])
       AND (sqlc.narg('application')::text IS NULL OR application = sqlc.narg('application')::text)
       AND (sqlc.narg('type')::text IS NULL OR type = sqlc.narg('type')::text)
 ORDER BY application ASC, type ASC, key ASC;
@@ -177,7 +177,7 @@ RETURNING 1;
 -- name: GetLatestEventLogId :one
 SELECT COALESCE(MAX(id), 0)::bigint
 FROM eventlog
-WHERE owner = @owner;
+WHERE owner = ANY(@owners::text[]);
 
 -- name: InsertEventLog :one
 INSERT INTO eventlog (
@@ -201,7 +201,7 @@ RETURNING id;
 SELECT id, owner, type, resource_kind, application, document_type,
        key, version, updated_by, created, payload
 FROM eventlog
-WHERE owner = @owner
+WHERE owner = ANY(@owners::text[])
       AND id > @after_id
 ORDER BY id ASC
 LIMIT sqlc.arg('limit')::bigint;

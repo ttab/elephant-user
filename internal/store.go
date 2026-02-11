@@ -86,10 +86,15 @@ func (s *PGStore) OnInboxMessageUpdate(
 
 func (s *PGStore) OnEventLogUpdate(
 	ctx context.Context, ch chan EventLogEvent,
-	owner string, afterID int64,
+	owners []string, afterID int64,
 ) {
+	ownerMap := make(map[string]bool)
+	for _, o := range owners {
+		ownerMap[o] = true
+	}
+
 	go s.EventLog.Listen(ctx, ch, func(msg EventLogEvent) bool {
-		return msg.Owner == owner && msg.ID > afterID
+		return ownerMap[msg.Owner] && msg.ID > afterID
 	})
 }
 
@@ -490,12 +495,12 @@ func (s *PGStore) GetDocument(
 }
 
 func (s *PGStore) ListDocuments(
-	ctx context.Context, owner string, application string,
+	ctx context.Context, owners []string, application string,
 	docType string, includePayload bool,
 ) ([]*Document, error) {
 	if includePayload {
 		rows, err := s.q.ListDocumentsFull(ctx, postgres.ListDocumentsFullParams{
-			Owner:       owner,
+			Owners:      owners,
 			Application: pg.TextOrNull(application),
 			Type:        pg.TextOrNull(docType),
 		})
@@ -524,7 +529,7 @@ func (s *PGStore) ListDocuments(
 	}
 
 	rows, err := s.q.ListDocumentsMetadata(ctx, postgres.ListDocumentsMetadataParams{
-		Owner:       owner,
+		Owners:      owners,
 		Application: pg.TextOrNull(application),
 		Type:        pg.TextOrNull(docType),
 	})
@@ -787,9 +792,9 @@ func (s *PGStore) DeleteProperties(
 }
 
 func (s *PGStore) GetLatestEventLogID(
-	ctx context.Context, owner string,
+	ctx context.Context, owners []string,
 ) (int64, error) {
-	id, err := s.q.GetLatestEventLogId(ctx, owner)
+	id, err := s.q.GetLatestEventLogId(ctx, owners)
 	if err != nil {
 		return -1, fmt.Errorf("get latest eventlog id: %w", err)
 	}
@@ -798,11 +803,11 @@ func (s *PGStore) GetLatestEventLogID(
 }
 
 func (s *PGStore) GetEventLogEntriesAfterID(
-	ctx context.Context, owner string,
+	ctx context.Context, owners []string,
 	afterID int64, limit int64,
 ) ([]EventLogEntry, error) {
 	rows, err := s.q.GetEventLogEntriesAfterId(ctx, postgres.GetEventLogEntriesAfterIdParams{
-		Owner:   owner,
+		Owners:  owners,
 		AfterID: afterID,
 		Limit:   limit,
 	})

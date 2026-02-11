@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
 	"strconv"
 	"time"
 
@@ -19,7 +20,10 @@ import (
 	"github.com/twitchtv/twirp"
 )
 
-const ScopeUser = "user"
+const (
+	ScopeUser     = "user"
+	ScopeDocAdmin = "doc_admin"
+)
 
 type MessageEvent struct {
 	ID        int64
@@ -185,7 +189,7 @@ type Store interface {
 		docType string, key string,
 	) (*Document, error)
 	ListDocuments(
-		ctx context.Context, owner string, application string,
+		ctx context.Context, owners []string, application string,
 		docType string, includePayload bool,
 	) ([]*Document, error)
 	UpdateDocument(
@@ -208,15 +212,15 @@ type Store interface {
 		deletes []PropertyDelete,
 	) error
 	GetLatestEventLogID(
-		ctx context.Context, owner string,
+		ctx context.Context, owners []string,
 	) (int64, error)
 	GetEventLogEntriesAfterID(
-		ctx context.Context, owner string,
+		ctx context.Context, owners []string,
 		afterID int64, limit int64,
 	) ([]EventLogEntry, error)
 	OnEventLogUpdate(
 		ctx context.Context, ch chan EventLogEvent,
-		owner string, afterID int64,
+		owners []string, afterID int64,
 	)
 }
 
@@ -246,6 +250,30 @@ func NewService(
 // Interface guard.
 var _ user.Messages = &Service{}
 
+func getAllOwners(auth *elephantine.AuthInfo) []string {
+	owners := []string{auth.Claims.Subject}
+
+	if auth.Claims.Org != "" {
+		owners = append(owners, auth.Claims.Org)
+	}
+
+	owners = append(owners, auth.Claims.Units...)
+
+	return owners
+}
+
+func isAllowedOwner(auth *elephantine.AuthInfo, owner string) bool {
+	if owner == auth.Claims.Subject {
+		return true
+	}
+
+	if owner == auth.Claims.Org {
+		return true
+	}
+
+	return slices.Contains(auth.Claims.Units, owner)
+}
+
 // GetDocument implements [user.Settings].
 func (s *Service) GetDocument(
 	ctx context.Context, req *user.GetDocumentRequest,
@@ -257,7 +285,11 @@ func (s *Service) GetDocument(
 
 	targetOwner := auth.Claims.Subject
 	if req.Owner != "" {
-		// TODO: Add logic to check if `sub` is allowed to read req.Owner's docs.
+		if !isAllowedOwner(auth, req.Owner) {
+			return nil, twirp.PermissionDenied.Errorf(
+				"not allowed to read documents for %q", req.Owner)
+		}
+
 		targetOwner = req.Owner
 	}
 
@@ -277,13 +309,12 @@ func (s *Service) GetDocument(
 
 	return &user.GetDocumentResponse{
 		Document: &user.Document{
-			Owner:       doc.Owner,
-			Application: doc.Application,
-			Type:        doc.Type,
-			Key:         doc.Key,
-			Version:     doc.Version,
-			// TODO: Admins will be able to edit all documents.
-			ReadOnly:      doc.Owner != auth.Claims.Subject,
+			Owner:         doc.Owner,
+			Application:   doc.Application,
+			Type:          doc.Type,
+			Key:           doc.Key,
+			Version:       doc.Version,
+			ReadOnly:      doc.Owner != auth.Claims.Subject && !auth.Claims.HasScope(ScopeDocAdmin),
 			SchemaVersion: doc.SchemaVersion,
 			Title:         doc.Title,
 			Created:       doc.Created.Format(time.RFC3339),
@@ -303,10 +334,10 @@ func (s *Service) ListDocuments(
 		return nil, err //nolint:wrapcheck
 	}
 
-	// TODO: Logic to list shared documents (where owner is org and user's units) would go here.
+	owners := getAllOwners(auth)
 
 	docs, err := s.store.ListDocuments(ctx,
-		auth.Claims.Subject, req.Application,
+		owners, req.Application,
 		req.Type, req.IncludePayload,
 	)
 	if err != nil {
@@ -332,13 +363,12 @@ func (s *Service) ListDocuments(
 			Key:           d.Key,
 			Version:       d.Version,
 			SchemaVersion: d.SchemaVersion,
-			// TODO: Admins will be able to edit all documents.
-			ReadOnly:  d.Owner != auth.Claims.Subject,
-			Title:     d.Title,
-			Created:   d.Created.Format(time.RFC3339),
-			Updated:   d.Updated.Format(time.RFC3339),
-			UpdatedBy: d.UpdatedBy,
-			Payload:   &newsdoc,
+			ReadOnly:      d.Owner != auth.Claims.Subject && !auth.Claims.HasScope(ScopeDocAdmin),
+			Title:         d.Title,
+			Created:       d.Created.Format(time.RFC3339),
+			Updated:       d.Updated.Format(time.RFC3339),
+			UpdatedBy:     d.UpdatedBy,
+			Payload:       &newsdoc,
 		}
 	}
 
@@ -358,7 +388,18 @@ func (s *Service) UpdateDocument(
 
 	targetOwner := auth.Claims.Subject
 	if req.Owner != "" {
-		// TODO: Add admin check here if targetOwner != `sub`.
+		if req.Owner != auth.Claims.Subject {
+			if !auth.Claims.HasScope(ScopeDocAdmin) {
+				return nil, twirp.PermissionDenied.Errorf(
+					"only admins can update documents for other owners")
+			}
+
+			if !isAllowedOwner(auth, req.Owner) {
+				return nil, twirp.PermissionDenied.Errorf(
+					"not allowed to update documents for %q", req.Owner)
+			}
+		}
+
 		targetOwner = req.Owner
 	}
 
@@ -425,7 +466,18 @@ func (s *Service) DeleteDocument(
 
 	targetOwner := auth.Claims.Subject
 	if req.Owner != "" {
-		// TODO: Add admin check here if targetOwner != `sub`.
+		if req.Owner != auth.Claims.Subject {
+			if !auth.Claims.HasScope(ScopeDocAdmin) {
+				return nil, twirp.PermissionDenied.Errorf(
+					"only admins can delete documents for other owners")
+			}
+
+			if !isAllowedOwner(auth, req.Owner) {
+				return nil, twirp.PermissionDenied.Errorf(
+					"not allowed to delete documents for %q", req.Owner)
+			}
+		}
+
 		targetOwner = req.Owner
 	}
 
@@ -527,17 +579,19 @@ func (s *Service) PollEventLog(
 		return nil, err //nolint:wrapcheck
 	}
 
+	owners := getAllOwners(auth)
+
 	// Start listening for setting updates.
 	notifications := make(chan EventLogEvent, 1)
 
 	go s.store.OnEventLogUpdate(
-		ctx, notifications, auth.Claims.Subject, req.AfterId,
+		ctx, notifications, owners, req.AfterId,
 	)
 
 	limit := int64(10)
 
 	if req.AfterId == -1 {
-		latestID, err := s.store.GetLatestEventLogID(ctx, auth.Claims.Subject)
+		latestID, err := s.store.GetLatestEventLogID(ctx, owners)
 		if err != nil {
 			return nil, twirp.InternalErrorf(
 				"get latest message id: %w", err)
@@ -548,7 +602,7 @@ func (s *Service) PollEventLog(
 
 	// Helper function to fetch and map events.
 	listLogEntries := func() ([]*user.EventLogEntry, int64, error) {
-		events, err := s.store.GetEventLogEntriesAfterID(ctx, auth.Claims.Subject, req.AfterId, limit)
+		events, err := s.store.GetEventLogEntriesAfterID(ctx, owners, req.AfterId, limit)
 		if err != nil {
 			return nil, 0, err //nolint:wrapcheck
 		}
