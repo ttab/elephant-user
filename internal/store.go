@@ -23,6 +23,7 @@ type NotifyChannel = string
 const (
 	NotifyChannelMessageUpdate      NotifyChannel = "message_update"
 	NotifyChannelInboxMessageUpdate NotifyChannel = "inbox_message_update"
+	NotifyChannelEventLogUpdate     NotifyChannel = "event_log_update"
 )
 
 type PGStore struct {
@@ -32,6 +33,7 @@ type PGStore struct {
 
 	Messages      *pg.FanOut[MessageEvent]
 	InboxMessages *pg.FanOut[MessageEvent]
+	EventLog      *pg.FanOut[EventLogEvent]
 }
 
 // Interface guard.
@@ -47,6 +49,7 @@ func NewPGStore(
 
 		Messages:      pg.NewFanOut[MessageEvent](NotifyChannelMessageUpdate),
 		InboxMessages: pg.NewFanOut[MessageEvent](NotifyChannelInboxMessageUpdate),
+		EventLog:      pg.NewFanOut[EventLogEvent](NotifyChannelEventLogUpdate),
 	}
 }
 
@@ -78,6 +81,15 @@ func (s *PGStore) OnInboxMessageUpdate(
 ) {
 	go s.InboxMessages.Listen(ctx, ch, func(msg MessageEvent) bool {
 		return msg.Recipient == recipient && msg.ID > afterID
+	})
+}
+
+func (s *PGStore) OnEventLogUpdate(
+	ctx context.Context, ch chan EventLogEvent,
+	owner string, afterID int64,
+) {
+	go s.EventLog.Listen(ctx, ch, func(msg EventLogEvent) bool {
+		return msg.Owner == owner && msg.ID > afterID
 	})
 }
 
@@ -561,7 +573,7 @@ func (s *PGStore) UpdateDocument(
 		return fmt.Errorf("upsert user: %w", err)
 	}
 
-	err = q.UpsertDocument(ctx, postgres.UpsertDocumentParams{
+	version, err := q.UpsertDocument(ctx, postgres.UpsertDocumentParams{
 		Owner:         update.Owner,
 		Application:   update.Application,
 		Type:          update.Type,
@@ -575,18 +587,19 @@ func (s *PGStore) UpdateDocument(
 		return fmt.Errorf("upsert document: %w", err)
 	}
 
-	err = q.InsertEventLog(ctx, postgres.InsertEventLogParams{
+	err = logAndNotify(ctx, q, postgres.InsertEventLogParams{
 		Owner:        update.Owner,
 		Type:         postgres.EventTypeUpdate,
 		ResourceKind: postgres.ResourceKindDocument,
 		Application:  update.Application,
 		DocumentType: pg.Text(update.Type),
 		Key:          update.Key,
+		Version:      pg.Int64(version),
 		UpdatedBy:    update.UpdatedBy,
 		Payload:      nil,
 	})
 	if err != nil {
-		return fmt.Errorf("insert event log: %w", err)
+		return fmt.Errorf("log and notify: %w", err)
 	}
 
 	err = tx.Commit(ctx)
@@ -620,7 +633,7 @@ func (s *PGStore) DeleteDocument(
 		return fmt.Errorf("delete document: %w", err)
 	}
 
-	err = q.InsertEventLog(ctx, postgres.InsertEventLogParams{
+	err = logAndNotify(ctx, q, postgres.InsertEventLogParams{
 		Owner:        owner,
 		Type:         postgres.EventTypeDelete,
 		ResourceKind: postgres.ResourceKindDocument,
@@ -631,7 +644,7 @@ func (s *PGStore) DeleteDocument(
 		Payload:      nil,
 	})
 	if err != nil {
-		return fmt.Errorf("insert event log: %w", err)
+		return fmt.Errorf("log and notify: %w", err)
 	}
 
 	err = tx.Commit(ctx)
@@ -704,7 +717,7 @@ func (s *PGStore) SetProperties(
 			return fmt.Errorf("upsert property %s/%s: %w", prop.Application, prop.Key, err)
 		}
 
-		err = q.InsertEventLog(ctx, postgres.InsertEventLogParams{
+		err = logAndNotify(ctx, q, postgres.InsertEventLogParams{
 			Owner:        owner,
 			Type:         postgres.EventTypeUpdate,
 			ResourceKind: postgres.ResourceKindProperty,
@@ -714,7 +727,7 @@ func (s *PGStore) SetProperties(
 			Payload:      nil,
 		})
 		if err != nil {
-			return fmt.Errorf("insert event log: %w", err)
+			return fmt.Errorf("log and notify: %w", err)
 		}
 	}
 
@@ -751,7 +764,7 @@ func (s *PGStore) DeleteProperties(
 			return fmt.Errorf("delete property %s/%s: %w", prop.Application, prop.Key, err)
 		}
 
-		err = q.InsertEventLog(ctx, postgres.InsertEventLogParams{
+		err = logAndNotify(ctx, q, postgres.InsertEventLogParams{
 			Owner:        owner,
 			Type:         postgres.EventTypeDelete,
 			ResourceKind: postgres.ResourceKindProperty,
@@ -761,7 +774,7 @@ func (s *PGStore) DeleteProperties(
 			Payload:      nil,
 		})
 		if err != nil {
-			return fmt.Errorf("insert event log: %w", err)
+			return fmt.Errorf("log and notify: %w", err)
 		}
 	}
 
@@ -771,6 +784,78 @@ func (s *PGStore) DeleteProperties(
 	}
 
 	return nil
+}
+
+func (s *PGStore) GetLatestEventLogID(
+	ctx context.Context, owner string,
+) (int64, error) {
+	id, err := s.q.GetLatestEventLogId(ctx, owner)
+	if err != nil {
+		return -1, fmt.Errorf("get latest eventlog id: %w", err)
+	}
+
+	return id, nil
+}
+
+func (s *PGStore) GetEventLogEntriesAfterID(
+	ctx context.Context, owner string,
+	afterID int64, limit int64,
+) ([]EventLogEntry, error) {
+	rows, err := s.q.GetEventLogEntriesAfterId(ctx, postgres.GetEventLogEntriesAfterIdParams{
+		Owner:   owner,
+		AfterID: afterID,
+		Limit:   limit,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("get event log entries: %w", err)
+	}
+
+	events := make([]EventLogEntry, len(rows))
+	for i, r := range rows {
+		events[i] = EventLogEntry{
+			ID:           r.ID,
+			Owner:        r.Owner,
+			Type:         r.Type,
+			ResourceKind: r.ResourceKind,
+			Application:  r.Application,
+			DocumentType: r.DocumentType.String,
+			Key:          r.Key,
+			Version:      r.Version.Int64,
+			UpdatedBy:    r.UpdatedBy,
+			Created:      r.Created.Time,
+			// Payload is currently unused and reserved for future extensibility.
+			Payload: r.Payload,
+		}
+	}
+
+	return events, nil
+}
+
+func logAndNotify(
+	ctx context.Context, q *postgres.Queries,
+	params postgres.InsertEventLogParams,
+) error {
+	id, err := q.InsertEventLog(ctx, params)
+	if err != nil {
+		return fmt.Errorf("insert event log: %w", err)
+	}
+
+	err = notifyEventLogUpdated(ctx, q, EventLogEvent{
+		ID:    id,
+		Owner: params.Owner,
+	})
+	if err != nil {
+		return fmt.Errorf("send notification: %w", err)
+	}
+
+	return nil
+}
+
+func notifyEventLogUpdated(
+	ctx context.Context, q *postgres.Queries,
+	payload EventLogEvent,
+) error {
+	return pgNotify(ctx, q, NotifyChannelEventLogUpdate, payload)
 }
 
 func pgNotify[T any](

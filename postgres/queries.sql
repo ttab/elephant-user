@@ -146,7 +146,7 @@ WHERE owner = @owner
       AND (sqlc.narg('type')::text IS NULL OR type = sqlc.narg('type')::text)
 ORDER BY application ASC, type ASC, key ASC;
 
--- name: UpsertDocument :exec
+-- name: UpsertDocument :one
 INSERT INTO document (
       owner, application, type, key,
       version, schema_version, title, created,
@@ -163,7 +163,8 @@ DO UPDATE SET
   title = EXCLUDED.title,
   updated_by = EXCLUDED.updated_by,
   updated = now(),
-  payload = EXCLUDED.payload;
+  payload = EXCLUDED.payload
+RETURNING version;
 
 -- name: DeleteDocument :one
 DELETE FROM document
@@ -173,18 +174,34 @@ WHERE owner = @owner
       AND key = @key
 RETURNING 1;
 
--- name: InsertEventLog :exec
+-- name: GetLatestEventLogId :one
+SELECT COALESCE(MAX(id), 0)::bigint
+FROM eventlog
+WHERE owner = @owner;
+
+-- name: InsertEventLog :one
 INSERT INTO eventlog (
-  owner, created, type, resource_kind, application,
-  document_type, updated_by, key, payload
+      owner, type, resource_kind, application, document_type,
+      key, version, updated_by, created, payload
 ) VALUES (
-  @owner,
-  now(),
-  @type, -- type (update/delete)
-  @resource_kind, -- resource_kind (document/property)
-  @application,
-  @document_type, -- empty if resource_kind is 'property'
-  @updated_by,
-  @key,
-  @payload
-);
+      @owner,
+      @type, -- type (update/delete)
+      @resource_kind, -- resource_kind (document/property)
+      @application,
+      @document_type, -- empty if resource_kind is 'property'
+      @key,
+      @version,
+      @updated_by,
+      now(),
+      @payload
+)
+RETURNING id;
+
+-- name: GetEventLogEntriesAfterId :many
+SELECT id, owner, type, resource_kind, application, document_type,
+       key, version, updated_by, created, payload
+FROM eventlog
+WHERE owner = @owner
+      AND id > @after_id
+ORDER BY id ASC
+LIMIT sqlc.arg('limit')::bigint;

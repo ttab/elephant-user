@@ -155,13 +155,14 @@ type Document struct {
 type Eventlog struct {
 	ID           int64
 	Owner        string
-	Created      pgtype.Timestamptz
 	Type         EventType
 	ResourceKind ResourceKind
 	Application  string
 	DocumentType pgtype.Text
-	UpdatedBy    string
 	Key          string
+	Version      pgtype.Int8
+	UpdatedBy    string
+	Created      pgtype.Timestamptz
 	Payload      []byte
 }
 

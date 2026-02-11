@@ -12,6 +12,7 @@ import (
 	"github.com/google/uuid"
 	newsdoc_rpc "github.com/ttab/elephant-api/newsdoc"
 	"github.com/ttab/elephant-api/user"
+	"github.com/ttab/elephant-user/postgres"
 	"github.com/ttab/elephantine"
 	"github.com/ttab/newsdoc"
 	"github.com/ttab/revisor"
@@ -23,6 +24,11 @@ const ScopeUser = "user"
 type MessageEvent struct {
 	ID        int64
 	Recipient string
+}
+
+type EventLogEvent struct {
+	ID    int64
+	Owner string
 }
 
 type InboxMessage struct {
@@ -76,6 +82,42 @@ type DocumentUpdate struct {
 	Title         string
 	UpdatedBy     string
 	Payload       []byte
+}
+
+type EventLogEntry struct {
+	ID           int64
+	Owner        string
+	Type         postgres.EventType
+	ResourceKind postgres.ResourceKind
+	Application  string
+	DocumentType string
+	Key          string
+	Version      int64
+	UpdatedBy    string
+	Created      time.Time
+	Payload      []byte
+}
+
+func mapEventType(t postgres.EventType) user.EventLogEntryType {
+	switch t {
+	case postgres.EventTypeUpdate:
+		return user.EventLogEntryType_EVENT_LOG_ENTRY_UPDATE
+	case postgres.EventTypeDelete:
+		return user.EventLogEntryType_EVENT_LOG_ENTRY_DELETE
+	default:
+		return user.EventLogEntryType_EVENT_LOG_ENTRY_UNSPECIFIED
+	}
+}
+
+func mapResourceKind(k postgres.ResourceKind) user.ResourceKind {
+	switch k {
+	case postgres.ResourceKindDocument:
+		return user.ResourceKind_RESOURCE_KIND_DOCUMENT
+	case postgres.ResourceKindProperty:
+		return user.ResourceKind_RESOURCE_KIND_PROPERTY
+	default:
+		return user.ResourceKind_RESOURCE_KIND_UNSPECIFIED
+	}
 }
 
 type Property struct {
@@ -165,6 +207,17 @@ type Store interface {
 		ctx context.Context, owner string,
 		deletes []PropertyDelete,
 	) error
+	GetLatestEventLogID(
+		ctx context.Context, owner string,
+	) (int64, error)
+	GetEventLogEntriesAfterID(
+		ctx context.Context, owner string,
+		afterID int64, limit int64,
+	) ([]EventLogEntry, error)
+	OnEventLogUpdate(
+		ctx context.Context, ch chan EventLogEvent,
+		owner string, afterID int64,
+	)
 }
 
 type DocumentValidator interface {
@@ -467,9 +520,93 @@ func (s *Service) DeleteProperties(
 
 // PollEventLog implements [user.Settings].
 func (s *Service) PollEventLog(
-	context.Context, *user.PollEventLogRequest,
+	ctx context.Context, req *user.PollEventLogRequest,
 ) (*user.PollEventLogResponse, error) {
-	panic("unimplemented")
+	auth, err := elephantine.RequireAnyScope(ctx, ScopeUser)
+	if err != nil {
+		return nil, err //nolint:wrapcheck
+	}
+
+	// Start listening for setting updates.
+	notifications := make(chan EventLogEvent, 1)
+
+	go s.store.OnEventLogUpdate(
+		ctx, notifications, auth.Claims.Subject, req.AfterId,
+	)
+
+	limit := int64(10)
+
+	if req.AfterId == -1 {
+		latestID, err := s.store.GetLatestEventLogID(ctx, auth.Claims.Subject)
+		if err != nil {
+			return nil, twirp.InternalErrorf(
+				"get latest message id: %w", err)
+		}
+
+		req.AfterId = latestID
+	}
+
+	// Helper function to fetch and map events.
+	listLogEntries := func() ([]*user.EventLogEntry, int64, error) {
+		events, err := s.store.GetEventLogEntriesAfterID(ctx, auth.Claims.Subject, req.AfterId, limit)
+		if err != nil {
+			return nil, 0, err //nolint:wrapcheck
+		}
+
+		maxID := req.AfterId
+		entries := make([]*user.EventLogEntry, len(events))
+
+		for i, e := range events {
+			entries[i] = &user.EventLogEntry{
+				Id:           e.ID,
+				Created:      e.Created.Format(time.RFC3339),
+				Owner:        e.Owner,
+				Application:  e.Application,
+				DocumentType: e.DocumentType,
+				Key:          e.Key,
+				Version:      e.Version,
+				UpdatedBy:    e.UpdatedBy,
+				Type:         mapEventType(e.Type),
+				Kind:         mapResourceKind(e.ResourceKind),
+			}
+
+			if e.ID > maxID {
+				maxID = e.ID
+			}
+		}
+
+		return entries, maxID, nil
+	}
+
+	// If the client is behind, we don't want to wait.
+	events, lastID, err := listLogEntries()
+	if err != nil {
+		return nil, twirp.InternalErrorf("list log entries: %w", err)
+	}
+
+	if len(events) > 0 {
+		return &user.PollEventLogResponse{
+			LastId:  lastID,
+			Entries: events,
+		}, nil
+	}
+
+	select {
+	case <-notifications:
+	case <-time.After(30 * time.Second):
+	case <-ctx.Done():
+		return nil, fmt.Errorf("client disconnected: %w", ctx.Err())
+	}
+
+	events, lastID, err = listLogEntries()
+	if err != nil {
+		return nil, twirp.InternalErrorf("list log entries: %w", err)
+	}
+
+	return &user.PollEventLogResponse{
+		LastId:  lastID,
+		Entries: events,
+	}, nil
 }
 
 // DeleteInboxMessage implements user.Messages.

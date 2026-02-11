@@ -137,6 +137,67 @@ func (q *Queries) GetDocument(ctx context.Context, arg GetDocumentParams) (Docum
 	return i, err
 }
 
+const getEventLogEntriesAfterId = `-- name: GetEventLogEntriesAfterId :many
+SELECT id, owner, type, resource_kind, application, document_type,
+       key, version, updated_by, created, payload
+FROM eventlog
+WHERE owner = $1
+      AND id > $2
+ORDER BY id ASC
+LIMIT $3::bigint
+`
+
+type GetEventLogEntriesAfterIdParams struct {
+	Owner   string
+	AfterID int64
+	Limit   int64
+}
+
+func (q *Queries) GetEventLogEntriesAfterId(ctx context.Context, arg GetEventLogEntriesAfterIdParams) ([]Eventlog, error) {
+	rows, err := q.db.Query(ctx, getEventLogEntriesAfterId, arg.Owner, arg.AfterID, arg.Limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Eventlog
+	for rows.Next() {
+		var i Eventlog
+		if err := rows.Scan(
+			&i.ID,
+			&i.Owner,
+			&i.Type,
+			&i.ResourceKind,
+			&i.Application,
+			&i.DocumentType,
+			&i.Key,
+			&i.Version,
+			&i.UpdatedBy,
+			&i.Created,
+			&i.Payload,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const getLatestEventLogId = `-- name: GetLatestEventLogId :one
+SELECT COALESCE(MAX(id), 0)::bigint
+FROM eventlog
+WHERE owner = $1
+`
+
+func (q *Queries) GetLatestEventLogId(ctx context.Context, owner string) (int64, error) {
+	row := q.db.QueryRow(ctx, getLatestEventLogId, owner)
+	var column_1 int64
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
 const getLatestInboxMessageId = `-- name: GetLatestInboxMessageId :one
 SELECT COALESCE(MAX(id), 0)::bigint AS latest_id
 FROM inbox_message
@@ -224,21 +285,23 @@ func (q *Queries) GetProperties(ctx context.Context, arg GetPropertiesParams) ([
 	return items, nil
 }
 
-const insertEventLog = `-- name: InsertEventLog :exec
+const insertEventLog = `-- name: InsertEventLog :one
 INSERT INTO eventlog (
-  owner, created, type, resource_kind, application,
-  document_type, updated_by, key, payload
+      owner, type, resource_kind, application, document_type,
+      key, version, updated_by, created, payload
 ) VALUES (
-  $1,
-  now(),
-  $2, -- type (update/delete)
-  $3, -- resource_kind (document/property)
-  $4,
-  $5, -- empty if resource_kind is 'property'
-  $6,
-  $7,
-  $8
+      $1,
+      $2, -- type (update/delete)
+      $3, -- resource_kind (document/property)
+      $4,
+      $5, -- empty if resource_kind is 'property'
+      $6,
+      $7,
+      $8,
+      now(),
+      $9
 )
+RETURNING id
 `
 
 type InsertEventLogParams struct {
@@ -247,23 +310,27 @@ type InsertEventLogParams struct {
 	ResourceKind ResourceKind
 	Application  string
 	DocumentType pgtype.Text
-	UpdatedBy    string
 	Key          string
+	Version      pgtype.Int8
+	UpdatedBy    string
 	Payload      []byte
 }
 
-func (q *Queries) InsertEventLog(ctx context.Context, arg InsertEventLogParams) error {
-	_, err := q.db.Exec(ctx, insertEventLog,
+func (q *Queries) InsertEventLog(ctx context.Context, arg InsertEventLogParams) (int64, error) {
+	row := q.db.QueryRow(ctx, insertEventLog,
 		arg.Owner,
 		arg.Type,
 		arg.ResourceKind,
 		arg.Application,
 		arg.DocumentType,
-		arg.UpdatedBy,
 		arg.Key,
+		arg.Version,
+		arg.UpdatedBy,
 		arg.Payload,
 	)
-	return err
+	var id int64
+	err := row.Scan(&id)
+	return id, err
 }
 
 const insertInboxMessage = `-- name: InsertInboxMessage :exec
@@ -600,7 +667,7 @@ func (q *Queries) UpdateInboxMessage(ctx context.Context, arg UpdateInboxMessage
 	return err
 }
 
-const upsertDocument = `-- name: UpsertDocument :exec
+const upsertDocument = `-- name: UpsertDocument :one
 INSERT INTO document (
       owner, application, type, key,
       version, schema_version, title, created,
@@ -618,6 +685,7 @@ DO UPDATE SET
   updated_by = EXCLUDED.updated_by,
   updated = now(),
   payload = EXCLUDED.payload
+RETURNING version
 `
 
 type UpsertDocumentParams struct {
@@ -631,8 +699,8 @@ type UpsertDocumentParams struct {
 	Payload       []byte
 }
 
-func (q *Queries) UpsertDocument(ctx context.Context, arg UpsertDocumentParams) error {
-	_, err := q.db.Exec(ctx, upsertDocument,
+func (q *Queries) UpsertDocument(ctx context.Context, arg UpsertDocumentParams) (int64, error) {
+	row := q.db.QueryRow(ctx, upsertDocument,
 		arg.Owner,
 		arg.Application,
 		arg.Type,
@@ -642,7 +710,9 @@ func (q *Queries) UpsertDocument(ctx context.Context, arg UpsertDocumentParams) 
 		arg.UpdatedBy,
 		arg.Payload,
 	)
-	return err
+	var version int64
+	err := row.Scan(&version)
+	return version, err
 }
 
 const upsertMessageWriteLock = `-- name: UpsertMessageWriteLock :exec
