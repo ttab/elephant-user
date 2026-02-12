@@ -19,7 +19,7 @@
             "role": {
               "enum": ["filter", "sortorder"]
             },
-            "kind": { "optional": true },
+            "contenttype": { "optional": true },
             "value": { "optional": true },
             "uuid": { "optional": true },
             "uri": { "optional": true }
@@ -61,7 +61,7 @@
                 "role": {
                   "enum": ["filter", "sortorder"]
                 },
-                "kind": { "optional": true },
+                "contenttype": { "optional": true },
                 "value": { "optional": true },
                 "uuid": { "optional": true },
                 "uri": { "optional": true }

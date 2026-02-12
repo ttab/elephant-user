@@ -1,22 +1,22 @@
 {
-  "lastId":  "1",
-  "messages":  [
+  "last_id": "1",
+  "messages": [
     {
-      "recipient":  "core://user/tester",
-      "id":  "1",
-      "created":  "2025-02-24T14:45:05+01:00",
-      "createdBy":  "core://user/tester",
-      "updated":  "2025-02-24T14:45:05+01:00",
-      "payload":  {
-        "uuid":  "3b482036-39fb-584d-8477-111111111111",
-        "type":  "tt/inbox-message",
-        "uri":  "message://inbox/1",
-        "title":  "Inbox Message 1",
-        "content":  [
+      "recipient": "core://user/tester",
+      "id": "1",
+      "created": "2023-01-10T20:06:37+01:00",
+      "created_by": "core://user/tester",
+      "updated": "2023-01-10T20:06:37+01:00",
+      "payload": {
+        "uuid": "3b482036-39fb-584d-8477-111111111111",
+        "type": "tt/inbox-message",
+        "uri": "message://inbox/1",
+        "title": "Inbox Message 1",
+        "content": [
           {
-            "type":  "core/text",
-            "data":  {
-              "text":  "Inbox Message Body"
+            "type": "core/text",
+            "data": {
+              "text": "Inbox Message Body"
             }
           }
         ]

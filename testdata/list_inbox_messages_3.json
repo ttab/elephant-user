@@ -1,31 +1,31 @@
 {
-  "latestId":  "3",
-  "earliestId":  "2",
-  "messages":  [
+  "latest_id": "3",
+  "earliest_id": "2",
+  "messages": [
     {
-      "recipient":  "core://user/tester",
-      "id":  "3",
-      "created":  "2025-02-24T14:45:05+01:00",
-      "createdBy":  "core://user/tester",
-      "updated":  "2025-02-24T14:45:05+01:00",
-      "payload":  {
-        "uuid":  "3b482036-39fb-584d-8477-333333333333",
-        "type":  "tt/inbox-message",
-        "uri":  "message://inbox/3",
-        "title":  "Inbox Message 3"
+      "recipient": "core://user/tester",
+      "id": "3",
+      "created": "2023-01-10T20:06:37+01:00",
+      "created_by": "core://user/tester",
+      "updated": "2023-01-10T20:06:37+01:00",
+      "payload": {
+        "uuid": "3b482036-39fb-584d-8477-333333333333",
+        "type": "tt/inbox-message",
+        "uri": "message://inbox/3",
+        "title": "Inbox Message 3"
       }
     },
     {
-      "recipient":  "core://user/tester",
-      "id":  "2",
-      "created":  "2025-02-24T14:45:05+01:00",
-      "createdBy":  "core://user/tester",
-      "updated":  "2025-02-24T14:45:05+01:00",
-      "payload":  {
-        "uuid":  "3b482036-39fb-584d-8477-222222222222",
-        "type":  "tt/inbox-message",
-        "uri":  "message://inbox/2",
-        "title":  "Inbox Message 2"
+      "recipient": "core://user/tester",
+      "id": "2",
+      "created": "2023-01-10T20:06:37+01:00",
+      "created_by": "core://user/tester",
+      "updated": "2023-01-10T20:06:37+01:00",
+      "payload": {
+        "uuid": "3b482036-39fb-584d-8477-222222222222",
+        "type": "tt/inbox-message",
+        "uri": "message://inbox/2",
+        "title": "Inbox Message 2"
       }
     }
   ]
