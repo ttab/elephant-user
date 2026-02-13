@@ -1,6 +1,23 @@
 {
   "version": 1,
   "name": "tt-settings",
+  "meta": [
+    {
+      "id": "core://view-setting-filter",
+      "block": {
+          "name": "Filter",
+          "declares": {
+            "role": "filter"
+          },
+          "attributes": {
+            "type": {},
+            "value": { "optional": true },
+            "uri": { "optional": true },
+            "uuid": { "optional": true }
+          }
+        }
+    }
+  ],
   "documents": [
     {
       "name": "View setting",
@@ -11,24 +28,20 @@
       },
       "meta": [
         {
-          "name": "Setting metadata",
+          "ref": "core://view-setting-filter"
+        },
+        {
+          "name": "Sort order",
           "declares": {
-            "type": "core/view-setting"
+            "role": "sortorder"
           },
           "attributes": {
-            "role": {
-              "enum": ["filter", "sortorder"]
-            },
-            "contenttype": { "optional": true },
-            "value": { "optional": true },
-            "uuid": { "optional": true },
-            "uri": { "optional": true }
+            "value": {}
           },
           "data": {
             "order": {
               "name": "Sort order",
-              "enum": ["asc", "desc"],
-              "optional": true
+              "enum": ["asc", "desc"]
             }
           }
         }
@@ -53,26 +66,8 @@
           },
           "meta": [
             {
-              "name": "Setting metadata",
-              "declares": {
-                "type": "core/wire-pane"
-              },
-              "attributes": {
-                "role": {
-                  "enum": ["filter", "sortorder"]
-                },
-                "contenttype": { "optional": true },
-                "value": { "optional": true },
-                "uuid": { "optional": true },
-                "uri": { "optional": true }
-              },
-              "data": {
-                "order": {
-                  "name": "Sort order",
-                  "enum": ["asc", "desc"],
-                  "optional": true
-                }
-              }
+              "ref": "core://view-setting-filter",
+              "minCount": 1
             }
           ]
         }

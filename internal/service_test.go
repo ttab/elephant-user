@@ -183,13 +183,11 @@ func TestService(t *testing.T) {
 			Title: "Assignments",
 			Meta: []*newsdoc.Block{
 				{
-					Type:        docType,
-					Contenttype: "assignment-type",
-					Role:        "filter",
-					Value:       "picture",
+					Role:  "filter",
+					Type:  "assignment-type",
+					Value: "picture",
 				},
 				{
-					Type:  docType,
 					Role:  "sortorder",
 					Value: "created",
 					Data: map[string]string{

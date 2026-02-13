@@ -15,13 +15,11 @@
       "title": "Assignments",
       "meta": [
         {
-          "type": "core/view-setting",
+          "type": "assignment-type",
           "role": "filter",
-          "value": "picture",
-          "contenttype": "assignment-type"
+          "value": "picture"
         },
         {
-          "type": "core/view-setting",
           "data": {
             "order": "desc"
           },
