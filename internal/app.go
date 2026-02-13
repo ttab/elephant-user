@@ -31,8 +31,10 @@ func Run(ctx context.Context, p Parameters) error {
 	}
 
 	messagesServer := user.NewMessagesServer(p.Service, opts.ServerOptions())
+	settingsServer := user.NewSettingsServer(p.Service, opts.ServerOptions())
 
 	p.APIServer.RegisterAPI(messagesServer, opts)
+	p.APIServer.RegisterAPI(settingsServer, opts)
 
 	grp := elephantine.NewErrGroup(ctx, p.Logger)
 

@@ -126,6 +126,7 @@ func runUser(ctx context.Context, cmd *cli.Command) error {
 		ctx, logger, dbpool,
 		store.Messages,
 		store.InboxMessages,
+		store.EventLog,
 	)
 
 	go store.RunCleaner(ctx, 12*time.Hour)

@@ -2,25 +2,37 @@ package internal
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
 	"strconv"
 	"time"
 
 	"github.com/google/uuid"
 	newsdoc_rpc "github.com/ttab/elephant-api/newsdoc"
 	"github.com/ttab/elephant-api/user"
+	"github.com/ttab/elephant-user/postgres"
 	"github.com/ttab/elephantine"
 	"github.com/ttab/newsdoc"
 	"github.com/ttab/revisor"
 	"github.com/twitchtv/twirp"
 )
 
-const ScopeUser = "user"
+const (
+	ScopeUser     = "user"
+	ScopeDocAdmin = "doc_admin"
+)
 
 type MessageEvent struct {
 	ID        int64
 	Recipient string
+}
+
+type EventLogEvent struct {
+	ID    int64
+	Owner string
 }
 
 type InboxMessage struct {
@@ -50,6 +62,87 @@ const (
 	MessageTypeSystem MessageType = "system"
 	MessageTypeInbox  MessageType = "inbox"
 )
+
+type Document struct {
+	Owner         string
+	Application   string
+	Type          string
+	Key           string
+	Version       int64
+	SchemaVersion string
+	Title         string
+	Created       time.Time
+	Updated       time.Time
+	UpdatedBy     string
+	Payload       []byte
+}
+
+type DocumentUpdate struct {
+	Owner         string
+	Application   string
+	Type          string
+	Key           string
+	SchemaVersion string
+	Title         string
+	UpdatedBy     string
+	Payload       []byte
+}
+
+type EventLogEntry struct {
+	ID           int64
+	Owner        string
+	Type         postgres.EventType
+	ResourceKind postgres.ResourceKind
+	Application  string
+	DocumentType string
+	Key          string
+	Version      int64
+	UpdatedBy    string
+	Created      time.Time
+	Payload      []byte
+}
+
+func mapEventType(t postgres.EventType) user.EventLogEntryType {
+	switch t {
+	case postgres.EventTypeUpdate:
+		return user.EventLogEntryType_EVENT_LOG_ENTRY_UPDATE
+	case postgres.EventTypeDelete:
+		return user.EventLogEntryType_EVENT_LOG_ENTRY_DELETE
+	default:
+		return user.EventLogEntryType_EVENT_LOG_ENTRY_UNSPECIFIED
+	}
+}
+
+func mapResourceKind(k postgres.ResourceKind) user.ResourceKind {
+	switch k {
+	case postgres.ResourceKindDocument:
+		return user.ResourceKind_RESOURCE_KIND_DOCUMENT
+	case postgres.ResourceKindProperty:
+		return user.ResourceKind_RESOURCE_KIND_PROPERTY
+	default:
+		return user.ResourceKind_RESOURCE_KIND_UNSPECIFIED
+	}
+}
+
+type Property struct {
+	Owner       string
+	Application string
+	Key         string
+	Value       string
+	Created     time.Time
+	Updated     time.Time
+}
+
+type PropertyUpdate struct {
+	Application string
+	Key         string
+	Value       string
+}
+
+type PropertyDelete struct {
+	Application string
+	Key         string
+}
 
 type Store interface {
 	OnMessageUpdate(
@@ -91,6 +184,44 @@ type Store interface {
 	DeleteInboxMessage(
 		ctx context.Context, recipient string, id int64,
 	) error
+	GetDocument(
+		ctx context.Context, owner string, application string,
+		docType string, key string,
+	) (*Document, error)
+	ListDocuments(
+		ctx context.Context, owners []string, application string,
+		docType string, includePayload bool,
+	) ([]*Document, error)
+	UpdateDocument(
+		ctx context.Context, update DocumentUpdate,
+	) error
+	DeleteDocument(
+		ctx context.Context, owner string, application string,
+		docType string, key string,
+	) error
+	GetProperties(
+		ctx context.Context, owner string,
+		application string, keys []string,
+	) ([]Property, error)
+	SetProperties(
+		ctx context.Context, owner string,
+		updates []PropertyUpdate,
+	) error
+	DeleteProperties(
+		ctx context.Context, owner string,
+		deletes []PropertyDelete,
+	) error
+	GetLatestEventLogID(
+		ctx context.Context, owners []string,
+	) (int64, error)
+	GetEventLogEntriesAfterID(
+		ctx context.Context, owners []string,
+		afterID int64, limit int64,
+	) ([]EventLogEntry, error)
+	OnEventLogUpdate(
+		ctx context.Context, ch chan EventLogEvent,
+		owners []string, afterID int64,
+	)
 }
 
 type DocumentValidator interface {
@@ -119,6 +250,419 @@ func NewService(
 // Interface guard.
 var _ user.Messages = &Service{}
 
+func getAllOwners(auth *elephantine.AuthInfo) []string {
+	owners := []string{auth.Claims.Subject}
+
+	if auth.Claims.Org != "" {
+		owners = append(owners, auth.Claims.Org)
+	}
+
+	owners = append(owners, auth.Claims.Units...)
+
+	return owners
+}
+
+func isAllowedOwner(auth *elephantine.AuthInfo, owner string) bool {
+	if owner == auth.Claims.Subject {
+		return true
+	}
+
+	if owner == auth.Claims.Org {
+		return true
+	}
+
+	return slices.Contains(auth.Claims.Units, owner)
+}
+
+// GetDocument implements [user.Settings].
+func (s *Service) GetDocument(
+	ctx context.Context, req *user.GetDocumentRequest,
+) (*user.GetDocumentResponse, error) {
+	auth, err := elephantine.RequireAnyScope(ctx, ScopeUser)
+	if err != nil {
+		return nil, err //nolint:wrapcheck
+	}
+
+	targetOwner := auth.Claims.Subject
+	if req.Owner != "" {
+		if !isAllowedOwner(auth, req.Owner) {
+			return nil, twirp.PermissionDenied.Errorf(
+				"not allowed to read documents for %q", req.Owner)
+		}
+
+		targetOwner = req.Owner
+	}
+
+	doc, err := s.store.GetDocument(ctx, targetOwner, req.Application, req.Type, req.Key)
+	if errors.Is(err, ErrDocNotFound) {
+		return nil, twirp.NotFoundError("no such document")
+	} else if err != nil {
+		return nil, twirp.InternalErrorf("get document: %w", err)
+	}
+
+	var newsdoc newsdoc_rpc.Document
+
+	err = json.Unmarshal(doc.Payload, &newsdoc)
+	if err != nil {
+		return nil, fmt.Errorf("unmarshal payload: %w", err)
+	}
+
+	return &user.GetDocumentResponse{
+		Document: &user.Document{
+			Owner:         doc.Owner,
+			Application:   doc.Application,
+			Type:          doc.Type,
+			Key:           doc.Key,
+			Version:       doc.Version,
+			ReadOnly:      doc.Owner != auth.Claims.Subject && !auth.Claims.HasScope(ScopeDocAdmin),
+			SchemaVersion: doc.SchemaVersion,
+			Title:         doc.Title,
+			Created:       doc.Created.Format(time.RFC3339),
+			Updated:       doc.Updated.Format(time.RFC3339),
+			UpdatedBy:     doc.UpdatedBy,
+			Payload:       &newsdoc,
+		},
+	}, nil
+}
+
+// ListDocuments implements [user.Settings].
+func (s *Service) ListDocuments(
+	ctx context.Context, req *user.ListDocumentsRequest,
+) (*user.ListDocumentsResponse, error) {
+	auth, err := elephantine.RequireAnyScope(ctx, ScopeUser)
+	if err != nil {
+		return nil, err //nolint:wrapcheck
+	}
+
+	owners := getAllOwners(auth)
+
+	docs, err := s.store.ListDocuments(ctx,
+		owners, req.Application,
+		req.Type, req.IncludePayload,
+	)
+	if err != nil {
+		return nil, twirp.InternalErrorf("list documents: %w", err)
+	}
+
+	res := make([]*user.Document, len(docs))
+
+	for i, d := range docs {
+		var newsdoc newsdoc_rpc.Document
+
+		if req.IncludePayload && len(d.Payload) > 0 {
+			err = json.Unmarshal(docs[i].Payload, &newsdoc)
+			if err != nil {
+				return nil, fmt.Errorf("unmarshal payload: %w", err)
+			}
+		}
+
+		res[i] = &user.Document{
+			Owner:         d.Owner,
+			Application:   d.Application,
+			Type:          d.Type,
+			Key:           d.Key,
+			Version:       d.Version,
+			SchemaVersion: d.SchemaVersion,
+			ReadOnly:      d.Owner != auth.Claims.Subject && !auth.Claims.HasScope(ScopeDocAdmin),
+			Title:         d.Title,
+			Created:       d.Created.Format(time.RFC3339),
+			Updated:       d.Updated.Format(time.RFC3339),
+			UpdatedBy:     d.UpdatedBy,
+			Payload:       &newsdoc,
+		}
+	}
+
+	return &user.ListDocumentsResponse{
+		Documents: res,
+	}, nil
+}
+
+// UpdateDocument implements [user.Settings].
+func (s *Service) UpdateDocument(
+	ctx context.Context, req *user.UpdateDocumentRequest,
+) (*user.UpdateDocumentResponse, error) {
+	auth, err := elephantine.RequireAnyScope(ctx, ScopeUser)
+	if err != nil {
+		return nil, err //nolint:wrapcheck
+	}
+
+	targetOwner := auth.Claims.Subject
+	if req.Owner != "" {
+		if req.Owner != auth.Claims.Subject {
+			if !auth.Claims.HasScope(ScopeDocAdmin) {
+				return nil, twirp.PermissionDenied.Errorf(
+					"only admins can update documents for other owners")
+			}
+
+			if !isAllowedOwner(auth, req.Owner) {
+				return nil, twirp.PermissionDenied.Errorf(
+					"not allowed to update documents for %q", req.Owner)
+			}
+		}
+
+		targetOwner = req.Owner
+	}
+
+	if req.Payload == nil {
+		return nil, twirp.RequiredArgumentError("payload")
+	}
+
+	newsdoc := newsdoc_rpc.DocumentFromRPC(req.Payload)
+
+	// Add nil uuid.UUID to satisfy the validator.
+	newsdoc.UUID = uuid.UUID{}.String()
+
+	validationResult, err := s.validator.ValidateDocument(ctx, &newsdoc)
+	if err != nil {
+		return nil, fmt.Errorf("validate newsdoc payload: %w", err)
+	}
+
+	if len(validationResult) > 0 {
+		err := twirp.InvalidArgument.Errorf(
+			"the document had %d validation errors, the first one is: %v",
+			len(validationResult), validationResult[0].String())
+
+		err = err.WithMeta("err_count",
+			strconv.Itoa(len(validationResult)))
+
+		for i := range validationResult {
+			err = err.WithMeta(strconv.Itoa(i),
+				validationResult[i].String())
+		}
+
+		return nil, err
+	}
+
+	payload, err := json.Marshal(req.Payload)
+	if err != nil {
+		return nil, fmt.Errorf("marshal document payload: %w", err)
+	}
+
+	err = s.store.UpdateDocument(ctx, DocumentUpdate{
+		Owner:         targetOwner,
+		Application:   req.Application,
+		Type:          req.Type,
+		Key:           req.Key,
+		SchemaVersion: req.SchemaVersion,
+		Title:         newsdoc.Title,
+		UpdatedBy:     auth.Claims.Subject,
+		Payload:       payload,
+	})
+	if err != nil {
+		return nil, twirp.InternalErrorf("update document: %w", err)
+	}
+
+	return &user.UpdateDocumentResponse{}, nil
+}
+
+// DeleteDocument implements [user.Settings].
+func (s *Service) DeleteDocument(
+	ctx context.Context, req *user.DeleteDocumentRequest,
+) (*user.DeleteDocumentResponse, error) {
+	auth, err := elephantine.RequireAnyScope(ctx, ScopeUser)
+	if err != nil {
+		return nil, err //nolint:wrapcheck
+	}
+
+	targetOwner := auth.Claims.Subject
+	if req.Owner != "" {
+		if req.Owner != auth.Claims.Subject {
+			if !auth.Claims.HasScope(ScopeDocAdmin) {
+				return nil, twirp.PermissionDenied.Errorf(
+					"only admins can delete documents for other owners")
+			}
+
+			if !isAllowedOwner(auth, req.Owner) {
+				return nil, twirp.PermissionDenied.Errorf(
+					"not allowed to delete documents for %q", req.Owner)
+			}
+		}
+
+		targetOwner = req.Owner
+	}
+
+	err = s.store.DeleteDocument(ctx, targetOwner, req.Application, req.Type, req.Key)
+	if err != nil {
+		return nil, twirp.InternalErrorf("delete document: %w", err)
+	}
+
+	return &user.DeleteDocumentResponse{}, nil
+}
+
+// GetProperties implements [user.Settings].
+func (s *Service) GetProperties(
+	ctx context.Context, req *user.GetPropertiesRequest,
+) (*user.GetPropertiesResponse, error) {
+	auth, err := elephantine.RequireAnyScope(ctx, ScopeUser)
+	if err != nil {
+		return nil, err //nolint:wrapcheck
+	}
+
+	props, err := s.store.GetProperties(ctx, auth.Claims.Subject, req.Application, req.Keys)
+	if err != nil {
+		return nil, twirp.InternalErrorf("get properties: %w", err)
+	}
+
+	var res user.GetPropertiesResponse
+
+	for i := range props {
+		res.Properties = append(res.Properties, &user.Property{
+			Owner:       props[i].Owner,
+			Application: props[i].Application,
+			Key:         props[i].Key,
+			Value:       props[i].Value,
+			Created:     props[i].Created.Format(time.RFC3339),
+			Updated:     props[i].Updated.Format(time.RFC3339),
+		})
+	}
+
+	return &res, nil
+}
+
+// SetProperties implements [user.Settings].
+func (s *Service) SetProperties(
+	ctx context.Context, req *user.SetPropertiesRequest,
+) (*user.SetPropertiesResponse, error) {
+	auth, err := elephantine.RequireAnyScope(ctx, ScopeUser)
+	if err != nil {
+		return nil, err //nolint:wrapcheck
+	}
+
+	updates := make([]PropertyUpdate, len(req.Properties))
+	for i, p := range req.Properties {
+		updates[i] = PropertyUpdate{
+			Application: p.Application,
+			Key:         p.Key,
+			Value:       p.Value,
+		}
+	}
+
+	err = s.store.SetProperties(ctx, auth.Claims.Subject, updates)
+	if err != nil {
+		return nil, twirp.InternalErrorf("set properties: %w", err)
+	}
+
+	return &user.SetPropertiesResponse{}, nil
+}
+
+// DeleteProperties implements [user.Settings].
+func (s *Service) DeleteProperties(
+	ctx context.Context, req *user.DeletePropertiesRequest,
+) (*user.DeletePropertiesResponse, error) {
+	auth, err := elephantine.RequireAnyScope(ctx, ScopeUser)
+	if err != nil {
+		return nil, err //nolint:wrapcheck
+	}
+
+	deletes := make([]PropertyDelete, len(req.Properties))
+	for i, p := range req.Properties {
+		deletes[i] = PropertyDelete{
+			Application: p.Application,
+			Key:         p.Key,
+		}
+	}
+
+	err = s.store.DeleteProperties(ctx, auth.Claims.Subject, deletes)
+	if err != nil {
+		return nil, twirp.InternalErrorf("delete properties: %w", err)
+	}
+
+	return &user.DeletePropertiesResponse{}, nil
+}
+
+// PollEventLog implements [user.Settings].
+func (s *Service) PollEventLog(
+	ctx context.Context, req *user.PollEventLogRequest,
+) (*user.PollEventLogResponse, error) {
+	auth, err := elephantine.RequireAnyScope(ctx, ScopeUser)
+	if err != nil {
+		return nil, err //nolint:wrapcheck
+	}
+
+	owners := getAllOwners(auth)
+
+	// Start listening for setting updates.
+	notifications := make(chan EventLogEvent, 1)
+
+	go s.store.OnEventLogUpdate(
+		ctx, notifications, owners, req.AfterId,
+	)
+
+	limit := int64(10)
+
+	if req.AfterId == -1 {
+		latestID, err := s.store.GetLatestEventLogID(ctx, owners)
+		if err != nil {
+			return nil, twirp.InternalErrorf(
+				"get latest message id: %w", err)
+		}
+
+		req.AfterId = latestID
+	}
+
+	// Helper function to fetch and map events.
+	listLogEntries := func() ([]*user.EventLogEntry, int64, error) {
+		events, err := s.store.GetEventLogEntriesAfterID(ctx, owners, req.AfterId, limit)
+		if err != nil {
+			return nil, 0, err //nolint:wrapcheck
+		}
+
+		maxID := req.AfterId
+		entries := make([]*user.EventLogEntry, len(events))
+
+		for i, e := range events {
+			entries[i] = &user.EventLogEntry{
+				Id:           e.ID,
+				Created:      e.Created.Format(time.RFC3339),
+				Owner:        e.Owner,
+				Application:  e.Application,
+				DocumentType: e.DocumentType,
+				Key:          e.Key,
+				Version:      e.Version,
+				UpdatedBy:    e.UpdatedBy,
+				Type:         mapEventType(e.Type),
+				Kind:         mapResourceKind(e.ResourceKind),
+			}
+
+			if e.ID > maxID {
+				maxID = e.ID
+			}
+		}
+
+		return entries, maxID, nil
+	}
+
+	// If the client is behind, we don't want to wait.
+	events, lastID, err := listLogEntries()
+	if err != nil {
+		return nil, twirp.InternalErrorf("list log entries: %w", err)
+	}
+
+	if len(events) > 0 {
+		return &user.PollEventLogResponse{
+			LastId:  lastID,
+			Entries: events,
+		}, nil
+	}
+
+	select {
+	case <-notifications:
+	case <-time.After(30 * time.Second):
+	case <-ctx.Done():
+		return nil, fmt.Errorf("client disconnected: %w", ctx.Err())
+	}
+
+	events, lastID, err = listLogEntries()
+	if err != nil {
+		return nil, twirp.InternalErrorf("list log entries: %w", err)
+	}
+
+	return &user.PollEventLogResponse{
+		LastId:  lastID,
+		Entries: events,
+	}, nil
+}
+
 // DeleteInboxMessage implements user.Messages.
 func (s *Service) DeleteInboxMessage(
 	ctx context.Context, req *user.DeleteInboxMessageRequest,
@@ -137,7 +681,7 @@ func (s *Service) DeleteInboxMessage(
 		ctx, auth.Claims.Subject, req.Id,
 	)
 	if err != nil {
-		return nil, twirp.InternalError("delete inbox message")
+		return nil, twirp.InternalErrorf("delete inbox message: %w", err)
 	}
 
 	return &user.DeleteInboxMessageResponse{}, nil
@@ -503,7 +1047,7 @@ func (s *Service) UpdateInboxMessage(
 		ctx, auth.Claims.Subject, req.Id, req.IsRead,
 	)
 	if err != nil {
-		return nil, twirp.InternalError("update inbox message")
+		return nil, twirp.InternalErrorf("update inbox message: %w", err)
 	}
 
 	return &user.UpdateInboxMessageResponse{}, nil

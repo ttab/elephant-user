@@ -46,8 +46,8 @@ INSERT INTO message_write_lock(
       @recipient, @message_type, @current_message_id
 )
 ON CONFLICT(recipient, message_type)
-DO UPDATE
-SET current_message_id = EXCLUDED.current_message_id;
+DO UPDATE SET
+  current_message_id = EXCLUDED.current_message_id;
 
 -- name: InsertInboxMessage :exec
 INSERT INTO inbox_message(
@@ -65,9 +65,9 @@ INSERT INTO message(
 
 -- name: UpsertUser :exec
 INSERT INTO "user"(
-      sub, created
+      sub, created, kind
 ) VALUES (
-      @sub, @created
+      @sub, @created, @kind
 )
 ON CONFLICT (sub)
 DO NOTHING;
@@ -93,3 +93,115 @@ WHERE created < now() - INTERVAL '6 months';
 -- name: DeleteOldMessages :exec
 DELETE FROM message
 WHERE created < now() - INTERVAL '2 weeks';
+
+-- name: GetProperties :many
+SELECT owner, application, key, value, created, updated
+FROM property
+WHERE owner = @owner
+      AND (sqlc.narg('application')::text IS NULL OR application = sqlc.narg('application')::text)
+      AND (sqlc.slice('keys')::text[] IS NULL OR key = ANY(sqlc.slice('keys')::text[]));
+
+-- name: UpsertProperty :exec
+INSERT INTO property (
+      owner, application, key, value, updated
+) VALUES (
+      @owner, @application, @key, @value, now()
+)
+ON CONFLICT (owner, application, key)
+DO UPDATE SET
+  value = EXCLUDED.value,
+  updated = now();
+
+-- name: DeleteProperty :one
+DELETE FROM property
+WHERE owner = @owner
+      AND application = @application
+      AND key = @key
+RETURNING 1;
+
+-- name: GetDocument :one
+SELECT owner, application, type, key, version, schema_version,
+       title, created, updated, updated_by, payload
+FROM document
+WHERE owner = @owner
+      AND application = @application
+      AND type = @type
+      AND key = @key;
+
+-- name: ListDocumentsMetadata :many
+SELECT owner, application, type, key, version, schema_version,
+       title, created, updated, updated_by
+FROM document
+WHERE owner = ANY(@owners::text[])
+      AND (sqlc.narg('application')::text IS NULL OR application = sqlc.narg('application')::text)
+      AND (sqlc.narg('type')::text IS NULL OR type = sqlc.narg('type')::text)
+ORDER BY application ASC, type ASC, key ASC;
+
+-- name: ListDocumentsFull :many
+SELECT owner, application, type, key, version, schema_version,
+       title, created, updated, updated_by, payload
+FROM document
+WHERE owner = ANY(@owners::text[])
+      AND (sqlc.narg('application')::text IS NULL OR application = sqlc.narg('application')::text)
+      AND (sqlc.narg('type')::text IS NULL OR type = sqlc.narg('type')::text)
+ORDER BY application ASC, type ASC, key ASC;
+
+-- name: UpsertDocument :one
+INSERT INTO document (
+      owner, application, type, key,
+      version, schema_version, title, created,
+      updated, updated_by, payload
+) VALUES (
+      @owner, @application, @type, @key,
+      1, @schema_version, @title, now(),
+      now(), @updated_by, @payload
+)
+ON CONFLICT (owner, application, type, key)
+DO UPDATE SET
+  version = document.version + 1,
+  schema_version = EXCLUDED.schema_version,
+  title = EXCLUDED.title,
+  updated_by = EXCLUDED.updated_by,
+  updated = now(),
+  payload = EXCLUDED.payload
+RETURNING version;
+
+-- name: DeleteDocument :one
+DELETE FROM document
+WHERE owner = @owner
+      AND application = @application
+      AND type = @type
+      AND key = @key
+RETURNING 1;
+
+-- name: GetLatestEventLogId :one
+SELECT COALESCE(MAX(id), 0)::bigint
+FROM eventlog
+WHERE owner = ANY(@owners::text[]);
+
+-- name: InsertEventLog :one
+INSERT INTO eventlog (
+      owner, type, resource_kind, application, document_type,
+      key, version, updated_by, created, payload
+) VALUES (
+      @owner,
+      @type, -- type (update/delete)
+      @resource_kind, -- resource_kind (document/property)
+      @application,
+      @document_type, -- empty if resource_kind is 'property'
+      @key,
+      @version,
+      @updated_by,
+      now(),
+      @payload
+)
+RETURNING id;
+
+-- name: GetEventLogEntriesAfterId :many
+SELECT id, owner, type, resource_kind, application, document_type,
+       key, version, updated_by, created, payload
+FROM eventlog
+WHERE owner = ANY(@owners::text[])
+      AND id > @after_id
+ORDER BY id ASC
+LIMIT sqlc.arg('limit')::bigint;

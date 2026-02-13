@@ -1,0 +1,77 @@
+{
+  "version": 1,
+  "name": "tt-settings",
+  "meta": [
+    {
+      "id": "core://view-setting-filter",
+      "block": {
+          "name": "Filter",
+          "declares": {
+            "role": "filter"
+          },
+          "attributes": {
+            "type": {},
+            "value": { "optional": true },
+            "uri": { "optional": true },
+            "uuid": { "optional": true }
+          }
+        }
+    }
+  ],
+  "documents": [
+    {
+      "name": "View setting",
+      "description": "Configuration for a user's view setting.",
+      "declares": "core/view-setting",
+      "attributes": {
+        "title": {}
+      },
+      "meta": [
+        {
+          "ref": "core://view-setting-filter"
+        },
+        {
+          "name": "Sort order",
+          "declares": {
+            "role": "sortorder"
+          },
+          "attributes": {
+            "value": {}
+          },
+          "data": {
+            "order": {
+              "name": "Sort order",
+              "enum": ["asc", "desc"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Wire panes setting",
+      "description": "Configuration for the user's wire pane setting.",
+      "declares": "core/wire-panes-setting",
+      "attributes": {
+        "title": {}
+      },
+      "content": [
+        {
+          "name": "Wire pane",
+          "declares": {
+            "type": "core/wire-pane"
+          },
+          "attributes": {
+            "uuid": {},
+            "title": {}
+          },
+          "meta": [
+            {
+              "ref": "core://view-setting-filter",
+              "minCount": 1
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

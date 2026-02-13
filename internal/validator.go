@@ -14,26 +14,26 @@ import (
 //go:embed schema_messages.json
 var schemaMessages []byte
 
+//go:embed schema_settings.json
+var schemaSettings []byte
+
 func NewValidator(_ context.Context) (*Validator, error) {
-	var local revisor.ConstraintSet
-
-	dec := json.NewDecoder(bytes.NewReader(schemaMessages))
-
-	dec.DisallowUnknownFields()
-
-	err := dec.Decode(&local)
+	messages, err := decodeConstraintSet(schemaMessages, "schema_messages.json")
 	if err != nil {
-		return nil, fmt.Errorf("unmarshal JSON: %w", err)
+		return nil, err
 	}
 
-	validator, err := revisor.NewValidator(local)
+	settings, err := decodeConstraintSet(schemaSettings, "schema_settings.json")
+	if err != nil {
+		return nil, err
+	}
+
+	v, err := revisor.NewValidator(messages, settings)
 	if err != nil {
 		return nil, fmt.Errorf("create validator: %w", err)
 	}
 
-	return &Validator{
-		validator: validator,
-	}, nil
+	return &Validator{validator: v}, nil
 }
 
 type Validator struct {
@@ -49,4 +49,18 @@ func (v *Validator) ValidateDocument(
 	}
 
 	return res, nil
+}
+
+func decodeConstraintSet(data []byte, name string) (revisor.ConstraintSet, error) {
+	var cs revisor.ConstraintSet
+
+	dec := json.NewDecoder(bytes.NewReader(data))
+	dec.DisallowUnknownFields()
+
+	err := dec.Decode(&cs)
+	if err != nil {
+		return cs, fmt.Errorf("decode %s: %w", name, err)
+	}
+
+	return cs, nil
 }

@@ -1,15 +1,15 @@
 {
-  "lastId":  "1",
-  "messages":  [
+  "last_id": "1",
+  "messages": [
     {
-      "id":  "1",
-      "created":  "2025-02-24T14:45:05+01:00",
-      "createdBy":  "core://user/tester",
-      "recipient":  "core://user/tester",
-      "docUuid":  "f6106dd5-db55-596a-bc26-d7f3bdf783e5",
-      "docType":  "core/article",
-      "payload":  {
-        "message":  "fix document"
+      "id": "1",
+      "created": "2023-01-10T20:06:37+01:00",
+      "created_by": "core://user/tester",
+      "recipient": "core://user/tester",
+      "doc_uuid": "f6106dd5-db55-596a-bc26-d7f3bdf783e5",
+      "doc_type": "core/article",
+      "payload": {
+        "message": "fix document"
       }
     }
   ]
