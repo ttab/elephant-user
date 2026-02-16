@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -572,7 +573,7 @@ func (s *PGStore) UpdateDocument(
 	err = q.UpsertUser(ctx, postgres.UpsertUserParams{
 		Sub:     update.Owner,
 		Created: pg.Time(time.Now()),
-		Kind:    postgres.UserKindUser,
+		Kind:    ownerToUserKind(update.Owner),
 	})
 	if err != nil {
 		return fmt.Errorf("upsert user: %w", err)
@@ -928,4 +929,16 @@ func (s *PGStore) removeOldMessages(ctx context.Context) error {
 	}
 
 	return nil
+}
+
+func ownerToUserKind(owner string) postgres.UserKind {
+	if strings.HasPrefix(owner, "core://unit/") {
+		return postgres.UserKindUnit
+	}
+
+	if strings.HasPrefix(owner, "core://org/") {
+		return postgres.UserKindOrg
+	}
+
+	return postgres.UserKindUser
 }
