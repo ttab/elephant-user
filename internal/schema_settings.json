@@ -66,8 +66,7 @@
           },
           "meta": [
             {
-              "ref": "core://view-setting-filter",
-              "minCount": 1
+              "ref": "core://view-setting-filter"
             }
           ]
         }
