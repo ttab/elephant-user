@@ -47,7 +47,7 @@ func main() {
 				Sources: cli.EnvVars("LOG_LEVEL"),
 				Value:   "debug",
 			},
-			&cli.StringFlag{
+			&cli.StringFlag{ //nolint:gosec // G101: Default dev connection string, not real credentials.
 				Name:    "pg-conn-uri",
 				Value:   "postgres://elephant-user:pass@localhost/elephant-user",
 				Sources: cli.EnvVars("PG_CONN_URI", "CONN_STRING"),
