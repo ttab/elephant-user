@@ -8,11 +8,11 @@ require (
 	github.com/jackc/pgx/v5 v5.8.0
 	github.com/joho/godotenv v1.5.1
 	github.com/prometheus/client_golang v1.23.2
-	github.com/ttab/elephant-api v0.20.0
+	github.com/ttab/elephant-api v0.21.1
 	github.com/ttab/elephantine v0.23.7
 	github.com/ttab/eltest v0.1.0
 	github.com/ttab/mage v0.8.0
-	github.com/ttab/newsdoc v0.8.0
+	github.com/ttab/newsdoc v1.0.0
 	github.com/ttab/revisor v0.10.0
 	github.com/twitchtv/twirp v8.1.3+incompatible
 	github.com/urfave/cli/v3 v3.6.2
