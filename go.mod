@@ -1,6 +1,6 @@
 module github.com/ttab/elephant-user
 
-go 1.25.6
+go 1.25.7
 
 require (
 	github.com/golang-jwt/jwt/v5 v5.3.1
@@ -12,7 +12,7 @@ require (
 	github.com/ttab/elephantine v0.23.7
 	github.com/ttab/eltest v0.1.0
 	github.com/ttab/mage v0.8.0
-	github.com/ttab/newsdoc v0.8.0
+	github.com/ttab/newsdoc v1.0.0
 	github.com/ttab/revisor v0.10.0
 	github.com/twitchtv/twirp v8.1.3+incompatible
 	github.com/urfave/cli/v3 v3.6.2
