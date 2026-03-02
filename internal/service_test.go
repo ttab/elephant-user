@@ -54,20 +54,17 @@ func TestService(t *testing.T) {
 	})
 
 	wg := sync.WaitGroup{}
-	wg.Add(1)
 
 	// Inbox messages
 
-	go func() {
-		defer wg.Done()
-
+	wg.Go(func() {
 		polledInboxMessages1, err := eu.Messages.PollInboxMessages(authCtx, &user.PollInboxMessagesRequest{})
 		test.Must(t, err, "poll inbox messages")
 
 		test.TestMessageAgainstGolden(t, regenerate, polledInboxMessages1,
 			filepath.Join(testData, "poll_inbox_messages_1.json"),
 			test.IgnoreTimestamps{})
-	}()
+	})
 
 	_, err := eu.Messages.PushInboxMessage(authCtx, &user.PushInboxMessageRequest{
 		Recipient: recipient,
@@ -143,18 +140,14 @@ func TestService(t *testing.T) {
 
 	// Messages
 
-	wg.Add(1)
-
-	go func() {
-		defer wg.Done()
-
+	wg.Go(func() {
 		polledMessages1, err := eu.Messages.PollMessages(authCtx, &user.PollMessagesRequest{})
 		test.Must(t, err, "poll messages")
 
 		test.TestMessageAgainstGolden(t, regenerate, polledMessages1,
 			filepath.Join(testData, "poll_messages_1.json"),
 			test.IgnoreTimestamps{})
-	}()
+	})
 
 	_, err = eu.Messages.PushMessage(authCtx, &user.PushMessageRequest{
 		Recipient: recipient,
@@ -267,18 +260,14 @@ func TestService(t *testing.T) {
 		filepath.Join(testData, "poll_event_log_1.json"),
 		test.IgnoreTimestamps{})
 
-	wg.Add(1)
-
-	go func() {
-		defer wg.Done()
-
+	wg.Go(func() {
 		polledEventLog2, err := eu.Settings.PollEventLog(authCtx, &user.PollEventLogRequest{AfterId: -1})
 		test.Must(t, err, "poll event log for document deletion")
 
 		test.TestMessageAgainstGolden(t, regenerate, polledEventLog2,
 			filepath.Join(testData, "poll_event_log_2.json"),
 			test.IgnoreTimestamps{})
-	}()
+	})
 
 	_, err = eu.Settings.DeleteDocument(authCtx, &user.DeleteDocumentRequest{
 		Application: docApp,
@@ -374,18 +363,14 @@ func TestService(t *testing.T) {
 
 	// Event log for shared documents
 
-	wg.Add(1)
-
-	go func() {
-		defer wg.Done()
-
+	wg.Go(func() {
 		polledEventLog3, err := eu.Settings.PollEventLog(authCtx, &user.PollEventLogRequest{AfterId: -1})
 		test.Must(t, err, "poll event log for shared document update")
 
 		test.TestMessageAgainstGolden(t, regenerate, polledEventLog3,
 			filepath.Join(testData, "poll_event_log_3.json"),
 			test.IgnoreTimestamps{})
-	}()
+	})
 
 	_, err = eu.Settings.UpdateDocument(adminAuthCtx, &user.UpdateDocumentRequest{
 		Owner:         orgTest,
