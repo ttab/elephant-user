@@ -10,7 +10,7 @@
       "updated": "2023-01-10T20:06:37+01:00",
       "payload": {
         "uuid": "3b482036-39fb-584d-8477-222222222222",
-        "type": "tt/inbox-message",
+        "type": "core/inbox-message",
         "uri": "message://inbox/2",
         "title": "Inbox Message 2"
       }
@@ -24,7 +24,7 @@
       "is_read": true,
       "payload": {
         "uuid": "3b482036-39fb-584d-8477-111111111111",
-        "type": "tt/inbox-message",
+        "type": "core/inbox-message",
         "uri": "message://inbox/1",
         "title": "Inbox Message 1",
         "content": [

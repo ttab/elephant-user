@@ -73,7 +73,7 @@ func TestService(t *testing.T) {
 		Recipient: recipient,
 		Payload: &newsdoc.Document{
 			Uuid:  "3b482036-39fb-584d-8477-111111111111",
-			Type:  "tt/inbox-message",
+			Type:  "core/inbox-message",
 			Uri:   "message://inbox/1",
 			Title: "Inbox Message 1",
 			Content: []*newsdoc.Block{
@@ -92,7 +92,7 @@ func TestService(t *testing.T) {
 		Recipient: recipient,
 		Payload: &newsdoc.Document{
 			Uuid:  "3b482036-39fb-584d-8477-222222222222",
-			Type:  "tt/inbox-message",
+			Type:  "core/inbox-message",
 			Uri:   "message://inbox/2",
 			Title: "Inbox Message 2",
 		},
@@ -103,7 +103,7 @@ func TestService(t *testing.T) {
 		Recipient: recipient,
 		Payload: &newsdoc.Document{
 			Uuid:  "3b482036-39fb-584d-8477-333333333333",
-			Type:  "tt/inbox-message",
+			Type:  "core/inbox-message",
 			Uri:   "message://inbox/3",
 			Title: "Inbox Message 3",
 		},

@@ -1,11 +1,11 @@
 {
   "version": 1,
-  "name": "tt-messages",
+  "name": "messages",
   "documents": [
     {
       "name": "Inbox message",
       "description": "A document that describes an inbox message intended for a recipient.",
-      "declares": "tt/inbox-message",
+      "declares": "core/inbox-message",
       "attributes": {
         "title": {},
         "uri": {
