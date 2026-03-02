@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -66,6 +67,8 @@ func TestService(t *testing.T) {
 			test.IgnoreTimestamps{})
 	})
 
+	time.Sleep(50 * time.Millisecond) // Let the polling listeners to be registered before triggering.
+
 	_, err := eu.Messages.PushInboxMessage(authCtx, &user.PushInboxMessageRequest{
 		Recipient: recipient,
 		Payload: &newsdoc.Document{
@@ -84,6 +87,8 @@ func TestService(t *testing.T) {
 		},
 	})
 	test.Must(t, err, "push inbox message")
+
+	time.Sleep(50 * time.Millisecond) // Prevent subsequent writes from being included in the poll response.
 
 	_, err = eu.Messages.PushInboxMessage(authCtx, &user.PushInboxMessageRequest{
 		Recipient: recipient,
@@ -148,6 +153,8 @@ func TestService(t *testing.T) {
 			filepath.Join(testData, "poll_messages_1.json"),
 			test.IgnoreTimestamps{})
 	})
+
+	time.Sleep(50 * time.Millisecond) // Let the polling listeners to be registered before triggering.
 
 	_, err = eu.Messages.PushMessage(authCtx, &user.PushMessageRequest{
 		Recipient: recipient,
@@ -269,12 +276,16 @@ func TestService(t *testing.T) {
 			test.IgnoreTimestamps{})
 	})
 
+	time.Sleep(50 * time.Millisecond) // Let the polling listeners to be registered before triggering.
+
 	_, err = eu.Settings.DeleteDocument(authCtx, &user.DeleteDocumentRequest{
 		Application: docApp,
 		Type:        docType,
 		Key:         docKey,
 	})
 	test.Must(t, err, "delete document")
+
+	time.Sleep(50 * time.Millisecond) // Prevent subsequent writes from being included in the poll response.
 
 	// Admin and shared access
 
@@ -371,6 +382,8 @@ func TestService(t *testing.T) {
 			filepath.Join(testData, "poll_event_log_3.json"),
 			test.IgnoreTimestamps{})
 	})
+
+	time.Sleep(50 * time.Millisecond) // Let the polling listeners to be registered before triggering.
 
 	_, err = eu.Settings.UpdateDocument(adminAuthCtx, &user.UpdateDocumentRequest{
 		Owner:         orgTest,
