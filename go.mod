@@ -9,7 +9,7 @@ require (
 	github.com/joho/godotenv v1.5.1
 	github.com/prometheus/client_golang v1.23.2
 	github.com/ttab/elephant-api v0.21.3
-	github.com/ttab/elephantine v0.23.7
+	github.com/ttab/elephantine v0.25.0
 	github.com/ttab/eltest v0.1.0
 	github.com/ttab/mage v0.9.0
 	github.com/ttab/newsdoc v1.0.0
