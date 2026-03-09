@@ -13,7 +13,7 @@ require (
 	github.com/ttab/eltest v0.1.0
 	github.com/ttab/mage v0.9.0
 	github.com/ttab/newsdoc v1.0.0
-	github.com/ttab/revisor v0.10.0
+	github.com/ttab/revisor v0.11.1
 	github.com/twitchtv/twirp v8.1.3+incompatible
 	github.com/urfave/cli/v3 v3.7.0
 )
