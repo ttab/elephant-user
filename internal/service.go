@@ -649,7 +649,7 @@ func (s *Service) PollEventLog(
 	case <-notifications:
 	case <-time.After(30 * time.Second):
 	case <-ctx.Done():
-		return nil, fmt.Errorf("client disconnected: %w", ctx.Err())
+		return nil, twirp.NewError(twirp.Canceled, ctx.Err().Error())
 	}
 
 	events, lastID, err = listLogEntries()
@@ -811,6 +811,8 @@ func (s *Service) PollInboxMessages(
 	select {
 	case <-notifications:
 	case <-time.After(30 * time.Second):
+	case <-ctx.Done():
+		return nil, twirp.NewError(twirp.Canceled, ctx.Err().Error())
 	}
 
 	msgs, err = listMessages()
@@ -906,6 +908,8 @@ func (s *Service) PollMessages(
 	select {
 	case <-notifications:
 	case <-time.After(30 * time.Second):
+	case <-ctx.Done():
+		return nil, twirp.NewError(twirp.Canceled, ctx.Err().Error())
 	}
 
 	msgs, err = listMessages()
