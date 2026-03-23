@@ -54,6 +54,20 @@ func NewPGStore(
 	}
 }
 
+// RunSubscriber starts a PostgreSQL LISTEN subscriber for all store
+// notification channels. Blocks until the context is cancelled.
+func (s *PGStore) RunSubscriber(ctx context.Context, pool *pgxpool.Pool) {
+	err := pg.NewSubscriber(s.logger, pool, []pg.ChannelSubscription{
+		s.Messages,
+		s.InboxMessages,
+		s.EventLog,
+	}).Run(ctx)
+	if err != nil && !errors.Is(err, context.Canceled) {
+		s.logger.ErrorContext(ctx, "pg notification subscriber stopped",
+			elephantine.LogKeyError, err)
+	}
+}
+
 // OnMessageUpdate notifies the channel ch of message updates for a recipient.
 // Subscription is automatically cancelled once the context is cancelled.
 //

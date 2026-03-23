@@ -21,7 +21,6 @@ import (
 	"github.com/ttab/elephant-user/internal"
 	"github.com/ttab/elephant-user/schema"
 	"github.com/ttab/elephantine"
-	"github.com/ttab/elephantine/pg"
 	"github.com/ttab/elephantine/test"
 	"github.com/ttab/eltest"
 	"github.com/twitchtv/twirp"
@@ -423,8 +422,8 @@ func startElephantUser(t *testing.T) TestElephantUser {
 	ctx := t.Context()
 	logger := slog.New(test.NewLogHandler(t, slog.LevelInfo))
 
-	pgTestInstance := eltest.NewPostgres(t)
-	pgEnv := pgTestInstance.Database(t, schema.Migrations, true)
+	pgTestInstance := eltest.NewPostgres(t, eltest.Postgres17_6)
+	pgEnv := pgTestInstance.Database(t, "elephant-user", schema.Migrations, true)
 
 	dbpool, err := pgxpool.New(ctx, pgEnv.PostgresURI)
 	test.Must(t, err, "create connection pool")
@@ -436,12 +435,7 @@ func startElephantUser(t *testing.T) TestElephantUser {
 
 	store := internal.NewPGStore(logger, dbpool)
 
-	go pg.Subscribe(
-		ctx, logger, dbpool,
-		store.Messages,
-		store.InboxMessages,
-		store.EventLog,
-	)
+	go store.RunSubscriber(ctx, dbpool)
 
 	validator, err := internal.NewValidator(ctx)
 	test.Must(t, err, "create validator")

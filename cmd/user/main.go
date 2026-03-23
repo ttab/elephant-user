@@ -15,7 +15,6 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/ttab/elephant-user/internal"
 	"github.com/ttab/elephantine"
-	"github.com/ttab/elephantine/pg"
 	"github.com/urfave/cli/v3"
 )
 
@@ -121,13 +120,7 @@ func runUser(ctx context.Context, cmd *cli.Command) error {
 
 	store := internal.NewPGStore(logger, dbpool)
 
-	// Open a connection to the database and subscribes to all store notifications.
-	go pg.Subscribe(
-		ctx, logger, dbpool,
-		store.Messages,
-		store.InboxMessages,
-		store.EventLog,
-	)
+	go store.RunSubscriber(ctx, dbpool)
 
 	go store.RunCleaner(ctx, 12*time.Hour)
 
