@@ -47,9 +47,13 @@ func main() {
 				Value:   "debug",
 			},
 			&cli.StringFlag{ //nolint:gosec // G101: Default dev connection string, not real credentials.
-				Name:    "pg-conn-uri",
+				Name:    "db",
 				Value:   "postgres://elephant-user:pass@localhost/elephant-user",
 				Sources: cli.EnvVars("PG_CONN_URI", "CONN_STRING"),
+			},
+			&cli.StringFlag{
+				Name:    "db-bouncer",
+				Sources: cli.EnvVars("BOUNCER_CONN_STRING"),
 			},
 			&cli.StringSliceFlag{
 				Name:    "cors-host",
@@ -78,11 +82,12 @@ func main() {
 
 func runUser(ctx context.Context, cmd *cli.Command) error {
 	var (
-		addr         = cmd.String("addr")
-		profileAddr  = cmd.String("profile-addr")
-		logLevel     = cmd.String("log-level")
-		pgConnString = cmd.String("pg-conn-uri")
-		corsHosts    = cmd.StringSlice("cors-host")
+		addr              = cmd.String("addr")
+		profileAddr       = cmd.String("profile-addr")
+		logLevel          = cmd.String("log-level")
+		connString        = cmd.String("db")
+		bouncerConnString = cmd.String("db-bouncer")
+		corsHosts         = cmd.StringSlice("cors-host")
 	)
 
 	logger := elephantine.SetUpLogger(logLevel, os.Stdout)
@@ -98,19 +103,37 @@ func runUser(ctx context.Context, cmd *cli.Command) error {
 		}
 	}()
 
-	dbpool, err := pgxpool.New(ctx, pgConnString)
+	pubsubPool, err := pgxpool.New(ctx, connString)
 	if err != nil {
 		return fmt.Errorf("create connection pool: %w", err)
 	}
 
 	defer func() {
 		// Don't block for close
-		go dbpool.Close()
+		go pubsubPool.Close()
 	}()
 
-	err = dbpool.Ping(ctx)
+	err = pubsubPool.Ping(ctx)
 	if err != nil {
 		return fmt.Errorf("connect to database: %w", err)
+	}
+
+	dbpool := pubsubPool
+
+	if bouncerConnString != "" && bouncerConnString != connString {
+		dbpool, err = pgxpool.New(ctx, bouncerConnString)
+		if err != nil {
+			return fmt.Errorf("create bouncer connection pool: %w", err)
+		}
+
+		defer func() {
+			go dbpool.Close()
+		}()
+
+		err = dbpool.Ping(ctx)
+		if err != nil {
+			return fmt.Errorf("connect to bouncer database: %w", err)
+		}
 	}
 
 	auth, err := elephantine.AuthenticationConfigFromCLI(ctx, cmd, nil)
@@ -120,7 +143,7 @@ func runUser(ctx context.Context, cmd *cli.Command) error {
 
 	store := internal.NewPGStore(logger, dbpool)
 
-	go store.RunSubscriber(ctx, dbpool)
+	go store.RunSubscriber(ctx, pubsubPool)
 
 	go store.RunCleaner(ctx, 12*time.Hour)
 
