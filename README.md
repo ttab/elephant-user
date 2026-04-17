@@ -22,3 +22,12 @@ The service implements a multi-tier access model based on JWT claims for documen
 - **Permissions**: 
   - Standard users can read and write their own data and read shared data.
   - Users with the `doc_admin` scope can manage shared data across their organization and units.
+
+### Schemas
+
+Setting documents are validated against [revisor](https://github.com/ttab/revisor) constraint sets embedded in the binary from `internal/schema_*.json`:
+
+- `internal/schema_messages.json` — constraints for inbox message payloads.
+- `internal/schema_settings.json` — constraints for setting documents.
+
+Adding a new setting type today requires editing `schema_settings.json` and rebuilding the service. The plan is to support dynamic settings schema registration through the user API so that schemas can be added at runtime without redeploying.

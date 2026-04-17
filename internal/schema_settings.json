@@ -71,6 +71,26 @@
           ]
         }
       ]
+    },
+    {
+      "name": "Nynorsk translation setting",
+      "description": "User's translation preferences for Nynorsk.",
+      "declares": "ntb/nynorsk",
+      "attributes": {
+        "title": {}
+      },
+      "meta": [
+        {
+          "name": "Translation preferences",
+          "declares": {
+            "type": "ntb/nynorsk"
+          },
+          "count": 1,
+          "data": {
+            "rule_string": {}
+          }
+        }
+      ]
     }
   ]
 }
