@@ -5,11 +5,11 @@ go 1.26.2
 require (
 	github.com/golang-jwt/jwt/v5 v5.3.1
 	github.com/google/uuid v1.6.0
-	github.com/jackc/pgx/v5 v5.9.1
+	github.com/jackc/pgx/v5 v5.9.2
 	github.com/joho/godotenv v1.5.1
 	github.com/prometheus/client_golang v1.23.2
 	github.com/ttab/elephant-api v0.22.1
-	github.com/ttab/elephantine v0.25.0
+	github.com/ttab/elephantine v0.26.1
 	github.com/ttab/eltest v0.2.2
 	github.com/ttab/mage v0.9.1
 	github.com/ttab/newsdoc v1.0.0
