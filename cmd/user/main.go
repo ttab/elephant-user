@@ -42,6 +42,19 @@ func main() {
 				Value:   ":1081",
 			},
 			&cli.StringFlag{
+				Name:    "tls-addr",
+				Value:   ":1443",
+				Sources: cli.EnvVars("TLS_ADDR", "TLS_LISTEN_ADDR"),
+			},
+			&cli.StringFlag{
+				Name:    "cert-file",
+				Sources: cli.EnvVars("TLS_CERT_PATH"),
+			},
+			&cli.StringFlag{
+				Name:    "key-file",
+				Sources: cli.EnvVars("TLS_KEY_PATH"),
+			},
+			&cli.StringFlag{
 				Name:    "log-level",
 				Sources: cli.EnvVars("LOG_LEVEL"),
 				Value:   "debug",
@@ -84,6 +97,9 @@ func runUser(ctx context.Context, cmd *cli.Command) error {
 	var (
 		addr              = cmd.String("addr")
 		profileAddr       = cmd.String("profile-addr")
+		tlsAddr           = cmd.String("tls-addr")
+		certFile          = cmd.String("cert-file")
+		keyFile           = cmd.String("key-file")
 		logLevel          = cmd.String("log-level")
 		connString        = cmd.String("db")
 		bouncerConnString = cmd.String("db-bouncer")
@@ -152,8 +168,16 @@ func runUser(ctx context.Context, cmd *cli.Command) error {
 		return fmt.Errorf("create validator: %w", err)
 	}
 
-	server := elephantine.NewAPIServer(logger, addr, profileAddr,
-		elephantine.APIServerCORSHosts(corsHosts...))
+	serverOpts := []elephantine.APIServerOption{
+		elephantine.APIServerCORSHosts(corsHosts...),
+	}
+
+	if certFile != "" {
+		serverOpts = append(serverOpts,
+			elephantine.APIServerTLS(tlsAddr, certFile, keyFile))
+	}
+
+	server := elephantine.NewAPIServer(logger, addr, profileAddr, serverOpts...)
 
 	service := internal.NewService(logger, store, validator)
 
