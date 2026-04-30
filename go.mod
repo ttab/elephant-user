@@ -8,7 +8,7 @@ require (
 	github.com/jackc/pgx/v5 v5.9.2
 	github.com/joho/godotenv v1.5.1
 	github.com/prometheus/client_golang v1.23.2
-	github.com/ttab/elephant-api v0.22.1
+	github.com/ttab/elephant-api v0.22.2
 	github.com/ttab/elephantine v0.26.1
 	github.com/ttab/eltest v0.2.2
 	github.com/ttab/mage v0.9.1
