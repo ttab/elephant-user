@@ -15,7 +15,7 @@ require (
 	github.com/ttab/newsdoc v1.0.0
 	github.com/ttab/revisor v0.11.2
 	github.com/twitchtv/twirp v8.1.3+incompatible
-	github.com/urfave/cli/v3 v3.8.0
+	github.com/urfave/cli/v3 v3.9.0
 )
 
 require (
