@@ -8,7 +8,7 @@ require (
 	github.com/jackc/pgx/v5 v5.9.2
 	github.com/joho/godotenv v1.5.1
 	github.com/prometheus/client_golang v1.23.2
-	github.com/ttab/elephant-api v0.22.1
+	github.com/ttab/elephant-api v0.23.0
 	github.com/ttab/elephantine v0.26.1
 	github.com/ttab/eltest v0.2.2
 	github.com/ttab/mage v0.9.1
@@ -70,7 +70,7 @@ require (
 	github.com/klauspost/compress v1.18.1 // indirect
 	github.com/klauspost/cpuid/v2 v2.3.0 // indirect
 	github.com/klauspost/crc32 v1.3.0 // indirect
-	github.com/magefile/mage v1.15.0 // indirect
+	github.com/magefile/mage v1.17.2 // indirect
 	github.com/minio/crc64nvme v1.1.1 // indirect
 	github.com/minio/md5-simd v1.1.2 // indirect
 	github.com/minio/minio-go/v7 v7.0.97 // indirect
