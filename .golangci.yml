@@ -15,7 +15,7 @@ linters:
     - godox
     - goheader
     - gomoddirectives
-    - gomodguard
+    - gomodguard_v2
     - goprintffuncname
     - gosec
     - importas
@@ -47,6 +47,11 @@ linters:
       min-complexity: 6
   exclusions:
     generated: lax
+    rules:
+      - linters:
+          - goconst
+          - gosec
+        path: _test\.go
     presets:
       - comments
       - common-false-positives
