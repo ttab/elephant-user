@@ -1,14 +1,24 @@
 package internal
 
 import (
-	"bytes"
 	"context"
 	_ "embed"
 	"encoding/json"
 	"fmt"
+	"log/slog"
+	"sync"
+	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/ttab/elephant-user/postgres"
+	"github.com/ttab/elephantine"
 	"github.com/ttab/newsdoc"
 	"github.com/ttab/revisor"
+)
+
+const (
+	LogKeyDeprecationLabel = "deprecation_label"
+	LogKeyEntityRef        = "entity_ref"
 )
 
 //go:embed schema_messages.json
@@ -17,33 +27,167 @@ var schemaMessages []byte
 //go:embed schema_settings.json
 var schemaSettings []byte
 
-func NewValidator(_ context.Context) (*Validator, error) {
-	messages, err := decodeConstraintSet(schemaMessages, "schema_messages.json")
-	if err != nil {
-		return nil, err
+// EmbeddedConfigSchemas returns the embedded constraint sets as
+// register-ready config schemas. Used to seed environments and tests.
+func EmbeddedConfigSchemas() []ConfigSchema {
+	return []ConfigSchema{
+		{
+			Name:    "settings",
+			Version: "v1.0.0",
+			Spec:    schemaSettings,
+			Usage:   postgres.SchemaUsageSettings,
+		},
+		{
+			Name:    "messages",
+			Version: "v1.0.0",
+			Spec:    schemaMessages,
+			Usage:   postgres.SchemaUsageMessages,
+		},
 	}
-
-	settings, err := decodeConstraintSet(schemaSettings, "schema_settings.json")
-	if err != nil {
-		return nil, err
-	}
-
-	v, err := revisor.NewValidator(messages, settings)
-	if err != nil {
-		return nil, fmt.Errorf("create validator: %w", err)
-	}
-
-	return &Validator{validator: v}, nil
 }
 
+// ValidatorStore is the storage interface the validator loads schemas
+// and deprecations from.
+type ValidatorStore interface {
+	GetActiveSchemas(ctx context.Context) ([]ConfigSchema, error)
+	GetActiveConfigGenerationID(ctx context.Context) (int64, error)
+	OnSchemaUpdate(ctx context.Context, ch chan SchemaEvent)
+	GetEnforcedDeprecations(ctx context.Context) (map[string]bool, error)
+	OnDeprecationUpdate(ctx context.Context, ch chan DeprecationEvent)
+}
+
+// Validator validates documents against the active config generation,
+// with one revisor validator per schema usage. Validators are rebuilt
+// when the active generation or deprecations change.
 type Validator struct {
-	validator *revisor.Validator
+	m                    sync.RWMutex
+	validators           map[postgres.SchemaUsage]*revisor.Validator
+	activeGenerationID   int64
+	enforcedDeprecations map[string]bool
+
+	logger *slog.Logger
+
+	deprecationsCounter         *prometheus.CounterVec
+	docsWithDeprecationsCounter *prometheus.CounterVec
+
+	cancel      func()
+	stopChannel chan struct{}
+	refreshChan chan chan struct{}
 }
 
+// NewValidator creates a validator that loads its schemas from the
+// store and reloads them when notified of changes (with a periodic
+// fallback).
+func NewValidator(
+	ctx context.Context, logger *slog.Logger, store ValidatorStore,
+	metricsRegisterer prometheus.Registerer,
+) (*Validator, error) {
+	if metricsRegisterer == nil {
+		metricsRegisterer = prometheus.DefaultRegisterer
+	}
+
+	deprecationsCounter := prometheus.NewCounterVec(prometheus.CounterOpts{
+		Name: "elephant_user_deprecations_total",
+		Help: "Total number of deprecated value uses by label.",
+	}, []string{"label"})
+
+	docsWithDeprecationsCounter := prometheus.NewCounterVec(prometheus.CounterOpts{
+		Name: "elephant_user_docs_with_deprecations_total",
+		Help: "Total number of validated documents that use deprecated values.",
+	}, []string{"doc_type"})
+
+	for _, c := range []prometheus.Collector{
+		deprecationsCounter, docsWithDeprecationsCounter,
+	} {
+		err := metricsRegisterer.Register(c)
+		if err != nil {
+			return nil, fmt.Errorf("register metric: %w", err)
+		}
+	}
+
+	ctx, cancel := context.WithCancel(ctx)
+
+	v := Validator{
+		logger:                      logger,
+		deprecationsCounter:         deprecationsCounter,
+		docsWithDeprecationsCounter: docsWithDeprecationsCounter,
+		cancel:                      cancel,
+		stopChannel:                 make(chan struct{}),
+		refreshChan:                 make(chan chan struct{}),
+	}
+
+	err := v.loadSchemas(ctx, store)
+	if err != nil {
+		cancel()
+
+		return nil, fmt.Errorf("load schemas: %w", err)
+	}
+
+	err = v.loadDeprecations(ctx, store)
+	if err != nil {
+		cancel()
+
+		return nil, fmt.Errorf("load deprecations: %w", err)
+	}
+
+	go v.reloadLoop(ctx, store)
+
+	return &v, nil
+}
+
+// RefreshSchemas synchronously triggers a reload of schemas and
+// deprecations.
+func (v *Validator) RefreshSchemas(ctx context.Context) error {
+	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+
+	ch := make(chan struct{})
+
+	select {
+	case v.refreshChan <- ch:
+	case <-ctx.Done():
+		return fmt.Errorf("request refresh: %w", ctx.Err())
+	}
+
+	select {
+	case <-ch:
+	case <-ctx.Done():
+		return fmt.Errorf("wait for refresh: %w", ctx.Err())
+	}
+
+	return nil
+}
+
+// Stop the validator reload loop.
+func (v *Validator) Stop() {
+	v.cancel()
+	<-v.stopChannel
+}
+
+// ActiveGenerationID returns the ID of the config generation the
+// current validators were built from.
+func (v *Validator) ActiveGenerationID() int64 {
+	v.m.RLock()
+	defer v.m.RUnlock()
+
+	return v.activeGenerationID
+}
+
+// ValidateDocument validates a document against the active schemas for
+// the given usage.
 func (v *Validator) ValidateDocument(
-	ctx context.Context, doc *newsdoc.Document,
+	ctx context.Context, usage postgres.SchemaUsage, doc *newsdoc.Document,
 ) ([]revisor.ValidationResult, error) {
-	res, err := v.validator.ValidateDocument(ctx, doc)
+	v.m.RLock()
+	val := v.validators[usage]
+	v.m.RUnlock()
+
+	if val == nil {
+		return nil, fmt.Errorf("no active schema for usage %q", usage)
+	}
+
+	res, err := val.ValidateDocument(ctx, doc,
+		revisor.WithDeprecationHandler(v.deprecationHandler))
 	if err != nil {
 		return nil, fmt.Errorf("validate document: %w", err)
 	}
@@ -51,16 +195,141 @@ func (v *Validator) ValidateDocument(
 	return res, nil
 }
 
-func decodeConstraintSet(data []byte, name string) (revisor.ConstraintSet, error) {
-	var cs revisor.ConstraintSet
+func (v *Validator) deprecationHandler(
+	ctx context.Context, doc *newsdoc.Document,
+	deprecation revisor.Deprecation,
+	deprecationContext revisor.DeprecationContext,
+) (revisor.DeprecationDecision, error) {
+	v.m.RLock()
+	enforced := v.enforcedDeprecations[deprecation.Label]
+	v.m.RUnlock()
 
-	dec := json.NewDecoder(bytes.NewReader(data))
-	dec.DisallowUnknownFields()
+	if !enforced {
+		var entityRef string
 
-	err := dec.Decode(&cs)
-	if err != nil {
-		return cs, fmt.Errorf("decode %s: %w", name, err)
+		if deprecationContext.Entity != nil {
+			entityRef = deprecationContext.Entity.String()
+		}
+
+		v.logger.WarnContext(ctx, "use of deprecated value",
+			elephantine.LogKeyDocumentUUID, doc.UUID,
+			LogKeyDeprecationLabel, deprecation.Label,
+			LogKeyEntityRef, entityRef)
+
+		v.deprecationsCounter.WithLabelValues(deprecation.Label).Inc()
+		v.docsWithDeprecationsCounter.WithLabelValues(doc.Type).Inc()
 	}
 
-	return cs, nil
+	return revisor.DeprecationDecision{
+		Enforce: enforced,
+	}, nil
+}
+
+func (v *Validator) reloadLoop(ctx context.Context, store ValidatorStore) {
+	defer close(v.stopChannel)
+
+	recheckInterval := 5 * time.Minute
+
+	schemaSub := make(chan SchemaEvent, 1)
+	deprecationSub := make(chan DeprecationEvent, 1)
+
+	store.OnSchemaUpdate(ctx, schemaSub)
+	store.OnDeprecationUpdate(ctx, deprecationSub)
+
+	for {
+		var refreshChan chan struct{}
+
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(recheckInterval):
+		case <-schemaSub:
+		case <-deprecationSub:
+		case refreshChan = <-v.refreshChan:
+		}
+
+		err := v.loadSchemas(ctx, store)
+		if err != nil {
+			v.logger.ErrorContext(ctx, "refresh schemas",
+				elephantine.LogKeyError, err,
+				elephantine.LogKeyCountMetric,
+				"elephant_user_schema_refresh_failure_count")
+		}
+
+		err = v.loadDeprecations(ctx, store)
+		if err != nil {
+			v.logger.ErrorContext(ctx, "refresh deprecations",
+				elephantine.LogKeyError, err,
+				elephantine.LogKeyCountMetric,
+				"elephant_user_deprecation_refresh_failure_count")
+		}
+
+		if refreshChan != nil {
+			close(refreshChan)
+		}
+	}
+}
+
+// loadSchemas builds one revisor validator per usage from the active
+// config generation and swaps them in. On failure the previous
+// validators are kept.
+func (v *Validator) loadSchemas(ctx context.Context, store ValidatorStore) error {
+	schemas, err := store.GetActiveSchemas(ctx)
+	if err != nil {
+		return fmt.Errorf("get active generation schemas: %w", err)
+	}
+
+	generationID, err := store.GetActiveConfigGenerationID(ctx)
+	if err != nil {
+		return fmt.Errorf("get active generation id: %w", err)
+	}
+
+	grouped := make(map[postgres.SchemaUsage][]revisor.ConstraintSet)
+
+	for _, schema := range schemas {
+		var cs revisor.ConstraintSet
+
+		err := json.Unmarshal(schema.Spec, &cs)
+		if err != nil {
+			return fmt.Errorf("decode schema %s@%s: %w",
+				schema.Name, schema.Version, err)
+		}
+
+		grouped[schema.Usage] = append(grouped[schema.Usage], cs)
+	}
+
+	validators := make(
+		map[postgres.SchemaUsage]*revisor.Validator, len(grouped))
+
+	for usage, sets := range grouped {
+		val, err := revisor.NewValidator(sets...)
+		if err != nil {
+			return fmt.Errorf(
+				"create validator for usage %q: %w", usage, err)
+		}
+
+		validators[usage] = val
+	}
+
+	v.m.Lock()
+	v.validators = validators
+	v.activeGenerationID = generationID
+	v.m.Unlock()
+
+	return nil
+}
+
+func (v *Validator) loadDeprecations(
+	ctx context.Context, store ValidatorStore,
+) error {
+	deprecations, err := store.GetEnforcedDeprecations(ctx)
+	if err != nil {
+		return fmt.Errorf("get enforced deprecations: %w", err)
+	}
+
+	v.m.Lock()
+	v.enforcedDeprecations = deprecations
+	v.m.Unlock()
+
+	return nil
 }

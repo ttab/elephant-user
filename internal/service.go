@@ -226,7 +226,8 @@ type Store interface {
 
 type DocumentValidator interface {
 	ValidateDocument(
-		ctx context.Context, document *newsdoc.Document,
+		ctx context.Context, usage postgres.SchemaUsage,
+		document *newsdoc.Document,
 	) ([]revisor.ValidationResult, error)
 }
 
@@ -412,7 +413,8 @@ func (s *Service) UpdateDocument(
 	// Add nil uuid.UUID to satisfy the validator.
 	newsdoc.UUID = uuid.UUID{}.String()
 
-	validationResult, err := s.validator.ValidateDocument(ctx, &newsdoc)
+	validationResult, err := s.validator.ValidateDocument(
+		ctx, postgres.SchemaUsageSettings, &newsdoc)
 	if err != nil {
 		return nil, fmt.Errorf("validate newsdoc payload: %w", err)
 	}
@@ -948,7 +950,8 @@ func (s *Service) PushInboxMessage(
 
 	newsdoc := newsdoc_rpc.DocumentFromRPC(req.Payload)
 
-	validationResult, err := s.validator.ValidateDocument(ctx, &newsdoc)
+	validationResult, err := s.validator.ValidateDocument(
+		ctx, postgres.SchemaUsageMessages, &newsdoc)
 	if err != nil {
 		return nil, fmt.Errorf("validate newsdoc payload: %w", err)
 	}
