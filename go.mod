@@ -9,7 +9,7 @@ require (
 	github.com/jackc/tern/v2 v2.4.1
 	github.com/joho/godotenv v1.5.1
 	github.com/prometheus/client_golang v1.23.2
-	github.com/ttab/elephant-api v0.24.2-0.20260716143754-75664fa0333a
+	github.com/ttab/elephant-api v0.24.2
 	github.com/ttab/elephantine v0.27.1
 	github.com/ttab/eltest v0.2.2
 	github.com/ttab/mage v0.9.1
