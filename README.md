@@ -25,9 +25,6 @@ The service implements a multi-tier access model based on JWT claims for documen
 
 ### Schemas
 
-Setting documents are validated against [revisor](https://github.com/ttab/revisor) constraint sets embedded in the binary from `internal/schema_*.json`:
+Setting documents and inbox messages are validated against [revisor](https://github.com/ttab/revisor) constraint sets stored in Postgres and managed through the `Configuration` API. Schemas are grouped into config generations that are registered and switched atomically, and running instances hot-reload their validators when the active generation changes. Each schema declares a usage — `settings` or `messages` — deciding what it validates.
 
-- `internal/schema_messages.json` — constraints for inbox message payloads.
-- `internal/schema_settings.json` — constraints for setting documents.
-
-Adding a new setting type today requires editing `schema_settings.json` and rebuilding the service. The plan is to support dynamic settings schema registration through the user API so that schemas can be added at runtime without redeploying.
+Schema deprecations can be toggled per label: unenforced uses are logged and counted, enforced ones block writes. The embedded `internal/schema_*.json` constraint sets remain as seed fixtures for bootstrapping and tests.

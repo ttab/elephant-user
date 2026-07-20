@@ -205,3 +205,102 @@ WHERE owner = ANY(@owners::text[])
       AND id > @after_id
 ORDER BY id ASC
 LIMIT sqlc.arg('limit')::bigint;
+
+-- name: EnsureSchema :exec
+INSERT INTO document_schema (name, version, spec, usage)
+VALUES (@name, @version, @spec, @usage)
+ON CONFLICT (name, version) DO NOTHING;
+
+-- name: GetSchema :one
+SELECT name, version, spec, usage
+FROM document_schema
+WHERE name = @name AND version = @version;
+
+-- name: GetActiveSchema :one
+SELECT ds.name, ds.version, ds.spec, ds.usage
+FROM config_generation AS cg
+     INNER JOIN config_generation_schema AS cgs
+           ON cgs.generation_id = cg.id
+     INNER JOIN document_schema AS ds
+           ON ds.name = cgs.name AND ds.version = cgs.version
+WHERE cg.active AND cgs.name = @name;
+
+-- name: InsertConfigGeneration :one
+INSERT INTO config_generation (identity_hash, description)
+VALUES (@identity_hash, @description)
+RETURNING id, identity_hash, description, created_at, activated_at, active;
+
+-- name: GetConfigGenerationByIdentityHash :one
+SELECT id, identity_hash, description, created_at, activated_at, active
+FROM config_generation
+WHERE identity_hash = @identity_hash;
+
+-- name: InsertConfigGenerationSchema :exec
+INSERT INTO config_generation_schema (generation_id, name, version, ordinal)
+VALUES (@generation_id, @name, @version, @ordinal);
+
+-- name: DeactivateActiveConfigGeneration :exec
+UPDATE config_generation SET active = false
+WHERE active AND id != @exclude_id;
+
+-- name: ActivateConfigGeneration :exec
+UPDATE config_generation SET active = true, activated_at = now()
+WHERE id = @id;
+
+-- name: GetActiveConfigGeneration :one
+SELECT id, identity_hash, description, created_at, activated_at, active
+FROM config_generation
+WHERE active;
+
+-- name: GetConfigGeneration :one
+SELECT id, identity_hash, description, created_at, activated_at, active
+FROM config_generation
+WHERE id = @id;
+
+-- name: ListConfigGenerations :many
+SELECT id, identity_hash, description, created_at, activated_at, active
+FROM config_generation
+WHERE (sqlc.arg(before)::bigint = 0 OR id < sqlc.arg(before)::bigint)
+ORDER BY id DESC
+LIMIT sqlc.arg(page_size)::bigint;
+
+-- name: GetConfigGenerationSchemas :many
+SELECT cgs.name, cgs.version, ds.usage
+FROM config_generation_schema AS cgs
+     INNER JOIN document_schema AS ds
+           ON ds.name = cgs.name AND ds.version = cgs.version
+WHERE cgs.generation_id = @generation_id
+ORDER BY cgs.ordinal;
+
+-- name: GetActiveSchemas :many
+SELECT cgs.name, cgs.version, ds.spec, ds.usage
+FROM config_generation AS cg
+     INNER JOIN config_generation_schema AS cgs
+           ON cgs.generation_id = cg.id
+     INNER JOIN document_schema AS ds
+           ON ds.name = cgs.name AND ds.version = cgs.version
+WHERE cg.active
+ORDER BY cgs.ordinal;
+
+-- name: GetDeprecations :many
+SELECT label, enforced
+FROM deprecation
+ORDER BY label;
+
+-- name: UpsertDeprecation :exec
+INSERT INTO deprecation (label, enforced)
+VALUES (@label, @enforced)
+ON CONFLICT (label) DO UPDATE SET enforced = excluded.enforced;
+
+-- name: GetEnforcedDeprecations :many
+SELECT label
+FROM deprecation
+WHERE enforced;
+
+-- name: GetConfigGenerationSchemasWithSpec :many
+SELECT cgs.name, cgs.version, ds.spec, ds.usage
+FROM config_generation_schema AS cgs
+     INNER JOIN document_schema AS ds
+           ON ds.name = cgs.name AND ds.version = cgs.version
+WHERE cgs.generation_id = @generation_id
+ORDER BY cgs.ordinal;
