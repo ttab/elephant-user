@@ -59,11 +59,10 @@ func TestService(t *testing.T) {
 
 	wg.Go(func() {
 		polledInboxMessages1, err := eu.Messages.PollInboxMessages(authCtx, &user.PollInboxMessagesRequest{})
-		test.Must(t, err, "poll inbox messages")
+		test.Mustf(t, err, "poll inbox messages")
 
-		test.TestMessageAgainstGolden(t, regenerate, polledInboxMessages1,
-			filepath.Join(testData, "poll_inbox_messages_1.json"),
-			test.IgnoreTimestamps{})
+		test.MessageAgainstGolden(t, regenerate, polledInboxMessages1,
+			filepath.Join(testData, "poll_inbox_messages_1.json"), test.IgnoreTimestamps{})
 	})
 
 	time.Sleep(50 * time.Millisecond) // Let the polling listeners to be registered before triggering.
@@ -85,7 +84,7 @@ func TestService(t *testing.T) {
 			},
 		},
 	})
-	test.Must(t, err, "push inbox message")
+	test.Mustf(t, err, "push inbox message")
 
 	time.Sleep(50 * time.Millisecond) // Prevent subsequent writes from being included in the poll response.
 
@@ -98,7 +97,7 @@ func TestService(t *testing.T) {
 			Title: "Inbox Message 2",
 		},
 	})
-	test.Must(t, err, "push inbox message")
+	test.Mustf(t, err, "push inbox message")
 
 	_, err = eu.Messages.PushInboxMessage(authCtx, &user.PushInboxMessageRequest{
 		Recipient: recipient,
@@ -109,48 +108,44 @@ func TestService(t *testing.T) {
 			Title: "Inbox Message 3",
 		},
 	})
-	test.Must(t, err, "push inbox message")
+	test.Mustf(t, err, "push inbox message")
 
 	_, err = eu.Messages.UpdateInboxMessage(authCtx, &user.UpdateInboxMessageRequest{
 		Id:     1,
 		IsRead: true,
 	})
-	test.Must(t, err, "mark inbox message as read")
+	test.Mustf(t, err, "mark inbox message as read")
 
 	listedInboxMessages1, err := eu.Messages.ListInboxMessages(authCtx, &user.ListInboxMessagesRequest{})
-	test.Must(t, err, "list inbox messages")
-	test.TestMessageAgainstGolden(t, regenerate, listedInboxMessages1,
-		filepath.Join(testData, "list_inbox_messages_1.json"),
-		test.IgnoreTimestamps{})
+	test.Mustf(t, err, "list inbox messages")
+	test.MessageAgainstGolden(t, regenerate, listedInboxMessages1,
+		filepath.Join(testData, "list_inbox_messages_1.json"), test.IgnoreTimestamps{})
 
 	listedInboxMessages2, err := eu.Messages.ListInboxMessages(authCtx, &user.ListInboxMessagesRequest{
 		BeforeId: 3,
 	})
-	test.Must(t, err, "list inbox messages before id")
-	test.TestMessageAgainstGolden(t, regenerate, listedInboxMessages2,
-		filepath.Join(testData, "list_inbox_messages_2.json"),
-		test.IgnoreTimestamps{})
+	test.Mustf(t, err, "list inbox messages before id")
+	test.MessageAgainstGolden(t, regenerate, listedInboxMessages2,
+		filepath.Join(testData, "list_inbox_messages_2.json"), test.IgnoreTimestamps{})
 
 	_, err = eu.Messages.DeleteInboxMessage(authCtx, &user.DeleteInboxMessageRequest{
 		Id: 1,
 	})
-	test.Must(t, err, "delete inbox message")
+	test.Mustf(t, err, "delete inbox message")
 
 	listedInboxMessages3, err := eu.Messages.ListInboxMessages(authCtx, &user.ListInboxMessagesRequest{})
-	test.Must(t, err, "list inbox messages after deletion")
-	test.TestMessageAgainstGolden(t, regenerate, listedInboxMessages3,
-		filepath.Join(testData, "list_inbox_messages_3.json"),
-		test.IgnoreTimestamps{})
+	test.Mustf(t, err, "list inbox messages after deletion")
+	test.MessageAgainstGolden(t, regenerate, listedInboxMessages3,
+		filepath.Join(testData, "list_inbox_messages_3.json"), test.IgnoreTimestamps{})
 
 	// Messages
 
 	wg.Go(func() {
 		polledMessages1, err := eu.Messages.PollMessages(authCtx, &user.PollMessagesRequest{})
-		test.Must(t, err, "poll messages")
+		test.Mustf(t, err, "poll messages")
 
-		test.TestMessageAgainstGolden(t, regenerate, polledMessages1,
-			filepath.Join(testData, "poll_messages_1.json"),
-			test.IgnoreTimestamps{})
+		test.MessageAgainstGolden(t, regenerate, polledMessages1,
+			filepath.Join(testData, "poll_messages_1.json"), test.IgnoreTimestamps{})
 	})
 
 	time.Sleep(50 * time.Millisecond) // Let the polling listeners to be registered before triggering.
@@ -164,7 +159,7 @@ func TestService(t *testing.T) {
 			"message": "fix document",
 		},
 	})
-	test.Must(t, err, "push message")
+	test.Mustf(t, err, "push message")
 
 	// Settings
 
@@ -196,27 +191,25 @@ func TestService(t *testing.T) {
 			},
 		},
 	})
-	test.Must(t, err, "update document")
+	test.Mustf(t, err, "update document")
 
 	getDocument1, err := eu.Settings.GetDocument(authCtx, &user.GetDocumentRequest{
 		Application: docApp,
 		Type:        docType,
 		Key:         docKey,
 	})
-	test.Must(t, err, "get document")
+	test.Mustf(t, err, "get document")
 
-	test.TestMessageAgainstGolden(t, regenerate, getDocument1,
-		filepath.Join(testData, "get_document_1.json"),
-		test.IgnoreTimestamps{})
+	test.MessageAgainstGolden(t, regenerate, getDocument1,
+		filepath.Join(testData, "get_document_1.json"), test.IgnoreTimestamps{})
 
 	listDocuments1, err := eu.Settings.ListDocuments(authCtx, &user.ListDocumentsRequest{
 		Application: docApp,
 	})
-	test.Must(t, err, "list documents")
+	test.Mustf(t, err, "list documents")
 
-	test.TestMessageAgainstGolden(t, regenerate, listDocuments1,
-		filepath.Join(testData, "list_documents_1.json"),
-		test.IgnoreTimestamps{})
+	test.MessageAgainstGolden(t, regenerate, listDocuments1,
+		filepath.Join(testData, "list_documents_1.json"), test.IgnoreTimestamps{})
 
 	// Properties
 
@@ -228,51 +221,47 @@ func TestService(t *testing.T) {
 			{Application: propApp, Key: "prop2", Value: "val2"},
 		},
 	})
-	test.Must(t, err, "set properties")
+	test.Mustf(t, err, "set properties")
 
 	getProperties1, err := eu.Settings.GetProperties(authCtx, &user.GetPropertiesRequest{
 		Application: propApp,
 		Keys:        []string{"prop1", "prop2"},
 	})
-	test.Must(t, err, "get properties")
+	test.Mustf(t, err, "get properties")
 
-	test.TestMessageAgainstGolden(t, regenerate, getProperties1,
-		filepath.Join(testData, "get_properties_1.json"),
-		test.IgnoreTimestamps{})
+	test.MessageAgainstGolden(t, regenerate, getProperties1,
+		filepath.Join(testData, "get_properties_1.json"), test.IgnoreTimestamps{})
 
 	_, err = eu.Settings.DeleteProperties(authCtx, &user.DeletePropertiesRequest{
 		Properties: []*user.PropertyDelete{
 			{Application: propApp, Key: "prop1"},
 		},
 	})
-	test.Must(t, err, "delete properties")
+	test.Mustf(t, err, "delete properties")
 
 	getProperties2, err := eu.Settings.GetProperties(authCtx, &user.GetPropertiesRequest{
 		Application: propApp,
 		Keys:        []string{"prop1", "prop2"},
 	})
-	test.Must(t, err, "get properties after deletion")
+	test.Mustf(t, err, "get properties after deletion")
 
-	test.TestMessageAgainstGolden(t, regenerate, getProperties2,
-		filepath.Join(testData, "get_properties_2.json"),
-		test.IgnoreTimestamps{})
+	test.MessageAgainstGolden(t, regenerate, getProperties2,
+		filepath.Join(testData, "get_properties_2.json"), test.IgnoreTimestamps{})
 
 	// Event log
 
 	polledEventLog1, err := eu.Settings.PollEventLog(authCtx, &user.PollEventLogRequest{})
-	test.Must(t, err, "poll event log")
+	test.Mustf(t, err, "poll event log")
 
-	test.TestMessageAgainstGolden(t, regenerate, polledEventLog1,
-		filepath.Join(testData, "poll_event_log_1.json"),
-		test.IgnoreTimestamps{})
+	test.MessageAgainstGolden(t, regenerate, polledEventLog1,
+		filepath.Join(testData, "poll_event_log_1.json"), test.IgnoreTimestamps{})
 
 	wg.Go(func() {
 		polledEventLog2, err := eu.Settings.PollEventLog(authCtx, &user.PollEventLogRequest{AfterId: -1})
-		test.Must(t, err, "poll event log for document deletion")
+		test.Mustf(t, err, "poll event log for document deletion")
 
-		test.TestMessageAgainstGolden(t, regenerate, polledEventLog2,
-			filepath.Join(testData, "poll_event_log_2.json"),
-			test.IgnoreTimestamps{})
+		test.MessageAgainstGolden(t, regenerate, polledEventLog2,
+			filepath.Join(testData, "poll_event_log_2.json"), test.IgnoreTimestamps{})
 	})
 
 	time.Sleep(50 * time.Millisecond) // Let the polling listeners to be registered before triggering.
@@ -282,7 +271,7 @@ func TestService(t *testing.T) {
 		Type:        docType,
 		Key:         docKey,
 	})
-	test.Must(t, err, "delete document")
+	test.Mustf(t, err, "delete document")
 
 	time.Sleep(50 * time.Millisecond) // Prevent subsequent writes from being included in the poll response.
 
@@ -323,7 +312,7 @@ func TestService(t *testing.T) {
 		SchemaVersion: "v1.0.0",
 		Payload:       &newsdoc.Document{Type: docType, Title: "Org wide access"},
 	})
-	test.MustNot(t, err, "create shared document as non-admin")
+	test.MustNotf(t, err, "create shared document as non-admin")
 
 	_, err = eu.Settings.UpdateDocument(adminAuthCtx, &user.UpdateDocumentRequest{
 		Owner:         orgTest,
@@ -333,7 +322,7 @@ func TestService(t *testing.T) {
 		SchemaVersion: "v1.0.0",
 		Payload:       &newsdoc.Document{Type: docType, Title: "Org wide access"},
 	})
-	test.Must(t, err, "create shared document as admin")
+	test.Mustf(t, err, "create shared document as admin")
 
 	_, err = eu.Settings.GetDocument(authCtx, &user.GetDocumentRequest{
 		Owner:       orgTest,
@@ -341,17 +330,16 @@ func TestService(t *testing.T) {
 		Type:        docType,
 		Key:         docKey,
 	})
-	test.Must(t, err, "get shared document as non-admin")
+	test.Mustf(t, err, "get shared document as non-admin")
 
 	// List documents as non-admin should include shared doc.
 	listDocuments2, err := eu.Settings.ListDocuments(authCtx, &user.ListDocumentsRequest{
 		Application: docApp,
 	})
-	test.Must(t, err, "list documents as non-admin")
+	test.Mustf(t, err, "list documents as non-admin")
 
-	test.TestMessageAgainstGolden(t, regenerate, listDocuments2,
-		filepath.Join(testData, "list_documents_2.json"),
-		test.IgnoreTimestamps{})
+	test.MessageAgainstGolden(t, regenerate, listDocuments2,
+		filepath.Join(testData, "list_documents_2.json"), test.IgnoreTimestamps{})
 
 	_, err = eu.Settings.GetDocument(otherUserAuthCtx, &user.GetDocumentRequest{
 		Owner:       orgTest,
@@ -359,7 +347,7 @@ func TestService(t *testing.T) {
 		Type:        docType,
 		Key:         docKey,
 	})
-	test.MustNot(t, err, "get shared doc from org it doesn't belong to")
+	test.MustNotf(t, err, "get shared doc from org it doesn't belong to")
 
 	_, err = eu.Settings.UpdateDocument(adminAuthCtx, &user.UpdateDocumentRequest{
 		Owner:         "core://unit/other",
@@ -369,17 +357,16 @@ func TestService(t *testing.T) {
 		SchemaVersion: "v1.0.0",
 		Payload:       &newsdoc.Document{Type: docType, Title: "Unit wide access"},
 	})
-	test.MustNot(t, err, "create shared doc for unit it doesn't belong to")
+	test.MustNotf(t, err, "create shared doc for unit it doesn't belong to")
 
 	// Event log for shared documents
 
 	wg.Go(func() {
 		polledEventLog3, err := eu.Settings.PollEventLog(authCtx, &user.PollEventLogRequest{AfterId: -1})
-		test.Must(t, err, "poll event log for shared document update")
+		test.Mustf(t, err, "poll event log for shared document update")
 
-		test.TestMessageAgainstGolden(t, regenerate, polledEventLog3,
-			filepath.Join(testData, "poll_event_log_3.json"),
-			test.IgnoreTimestamps{})
+		test.MessageAgainstGolden(t, regenerate, polledEventLog3,
+			filepath.Join(testData, "poll_event_log_3.json"), test.IgnoreTimestamps{})
 	})
 
 	time.Sleep(50 * time.Millisecond) // Let the polling listeners to be registered before triggering.
@@ -394,7 +381,7 @@ func TestService(t *testing.T) {
 			Type: docType, Title: "Event Log Trigger Doc",
 		},
 	})
-	test.Must(t, err, "update shared document as admin")
+	test.Mustf(t, err, "update shared document as admin")
 
 	wg.Wait()
 }
@@ -415,7 +402,7 @@ func (teu *TestElephantUser) AccessToken(t *testing.T, claims elephantine.JWTCla
 	token := jwt.NewWithClaims(jwt.SigningMethodES384, claims)
 
 	ss, err := token.SignedString(teu.JWTKey)
-	test.Must(t, err, "sign JWT token")
+	test.Mustf(t, err, "sign JWT token")
 
 	return ss
 }
@@ -430,7 +417,7 @@ func startElephantUser(t *testing.T) TestElephantUser {
 	pgEnv := pgTestInstance.Database(t, "elephant-user", schema.Migrations, true)
 
 	dbpool, err := pgxpool.New(ctx, pgEnv.PostgresURI)
-	test.Must(t, err, "create connection pool")
+	test.Mustf(t, err, "create connection pool")
 
 	t.Cleanup(func() {
 		// We don't want to block cleanup waiting for pool.
@@ -445,19 +432,19 @@ func startElephantUser(t *testing.T) TestElephantUser {
 	// that its initial load picks them up.
 	_, err = store.RegisterConfigGeneration(ctx,
 		"embedded schemas", internal.EmbeddedConfigSchemas(), true)
-	test.Must(t, err, "register embedded schemas")
+	test.Mustf(t, err, "register embedded schemas")
 
 	reg := prometheus.NewRegistry()
 
 	validator, err := internal.NewValidator(ctx, logger, store, reg)
-	test.Must(t, err, "create validator")
+	test.Mustf(t, err, "create validator")
 
 	t.Cleanup(validator.Stop)
 
 	apiServer, client := elephantine.NewTestAPIServer(t, logger)
 
 	jwtKey, err := ecdsa.GenerateKey(elliptic.P384(), rand.Reader)
-	test.Must(t, err, "create signing key")
+	test.Mustf(t, err, "create signing key")
 
 	auth := elephantine.NewStaticAuthInfoParser(ctx, jwtKey.PublicKey,
 		elephantine.JWTAuthInfoParserOptions{
@@ -475,12 +462,13 @@ func startElephantUser(t *testing.T) TestElephantUser {
 		Service:              service,
 		ConfigurationService: configurationService,
 	})
-	test.Must(t, err, "run application")
+	test.Mustf(t, err, "run application")
 
 	messages := user.NewMessagesProtobufClient("http://"+apiServer.Addr(), client)
 	settings := user.NewSettingsProtobufClient("http://"+apiServer.Addr(), client)
 	configuration := user.NewConfigurationProtobufClient(
-		"http://"+apiServer.Addr(), client)
+		"http://"+apiServer.Addr(), client,
+	)
 
 	return TestElephantUser{
 		JWTKey:        jwtKey,

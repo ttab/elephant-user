@@ -7,12 +7,12 @@
     "activated": "2023-01-10T20:06:37+01:00",
     "schemas": [
       {
-        "name": "settings",
+        "name": "se.ecms.user.settings",
         "version": "v1.0.0",
         "usage": "SCHEMA_USAGE_SETTINGS"
       },
       {
-        "name": "messages",
+        "name": "se.ecms.user.messages",
         "version": "v1.0.0",
         "usage": "SCHEMA_USAGE_MESSAGES"
       },

@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "name": "messages",
+  "name": "se.ecms.user.messages",
   "documents": [
     {
       "name": "Inbox message",

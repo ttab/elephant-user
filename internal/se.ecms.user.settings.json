@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "name": "settings",
+  "name": "se.ecms.user.settings",
   "meta": [
     {
       "id": "core://view-setting-filter",

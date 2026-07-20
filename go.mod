@@ -1,6 +1,6 @@
 module github.com/ttab/elephant-user
 
-go 1.26.4
+go 1.26.5
 
 require (
 	github.com/golang-jwt/jwt/v5 v5.3.1
@@ -10,7 +10,7 @@ require (
 	github.com/joho/godotenv v1.5.1
 	github.com/prometheus/client_golang v1.23.2
 	github.com/ttab/elephant-api v0.24.2
-	github.com/ttab/elephantine v0.27.1
+	github.com/ttab/elephantine v0.27.2
 	github.com/ttab/eltest v0.2.2
 	github.com/ttab/mage v0.9.1
 	github.com/ttab/newsdoc v1.1.0
