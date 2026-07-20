@@ -400,9 +400,13 @@ func TestService(t *testing.T) {
 }
 
 type TestElephantUser struct {
-	JWTKey   *ecdsa.PrivateKey
-	Messages user.Messages
-	Settings user.Settings
+	JWTKey        *ecdsa.PrivateKey
+	Messages      user.Messages
+	Settings      user.Settings
+	Configuration user.Configuration
+	Store         *internal.PGStore
+	Validator     *internal.Validator
+	Registry      *prometheus.Registry
 }
 
 func (teu *TestElephantUser) AccessToken(t *testing.T, claims elephantine.JWTClaims) string {
@@ -437,8 +441,18 @@ func startElephantUser(t *testing.T) TestElephantUser {
 
 	go store.RunSubscriber(ctx, dbpool)
 
-	validator, err := internal.NewValidator(ctx)
+	// Seed the embedded schemas before constructing the validator so
+	// that its initial load picks them up.
+	_, err = store.RegisterConfigGeneration(ctx,
+		"embedded schemas", internal.EmbeddedConfigSchemas(), true)
+	test.Must(t, err, "register embedded schemas")
+
+	reg := prometheus.NewRegistry()
+
+	validator, err := internal.NewValidator(ctx, logger, store, reg)
 	test.Must(t, err, "create validator")
+
+	t.Cleanup(validator.Stop)
 
 	apiServer, client := elephantine.NewTestAPIServer(t, logger)
 
@@ -450,26 +464,32 @@ func startElephantUser(t *testing.T) TestElephantUser {
 			Issuer: "test",
 		})
 
-	reg := prometheus.NewRegistry()
-
 	service := internal.NewService(logger, store, validator)
+	configurationService := internal.NewConfigurationService(logger, store)
 
 	err = internal.Run(ctx, internal.Parameters{
-		Logger:         logger,
-		APIServer:      apiServer,
-		AuthInfoParser: auth,
-		Registerer:     reg,
-		Service:        service,
+		Logger:               logger,
+		APIServer:            apiServer,
+		AuthInfoParser:       auth,
+		Registerer:           reg,
+		Service:              service,
+		ConfigurationService: configurationService,
 	})
 	test.Must(t, err, "run application")
 
 	messages := user.NewMessagesProtobufClient("http://"+apiServer.Addr(), client)
 	settings := user.NewSettingsProtobufClient("http://"+apiServer.Addr(), client)
+	configuration := user.NewConfigurationProtobufClient(
+		"http://"+apiServer.Addr(), client)
 
 	return TestElephantUser{
-		JWTKey:   jwtKey,
-		Messages: messages,
-		Settings: settings,
+		JWTKey:        jwtKey,
+		Messages:      messages,
+		Settings:      settings,
+		Configuration: configuration,
+		Store:         store,
+		Validator:     validator,
+		Registry:      reg,
 	}
 }
 

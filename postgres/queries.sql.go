@@ -11,6 +11,26 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const activateConfigGeneration = `-- name: ActivateConfigGeneration :exec
+UPDATE config_generation SET active = true, activated_at = now()
+WHERE id = $1
+`
+
+func (q *Queries) ActivateConfigGeneration(ctx context.Context, id int64) error {
+	_, err := q.db.Exec(ctx, activateConfigGeneration, id)
+	return err
+}
+
+const deactivateActiveConfigGeneration = `-- name: DeactivateActiveConfigGeneration :exec
+UPDATE config_generation SET active = false
+WHERE active AND id != $1
+`
+
+func (q *Queries) DeactivateActiveConfigGeneration(ctx context.Context, excludeID int64) error {
+	_, err := q.db.Exec(ctx, deactivateActiveConfigGeneration, excludeID)
+	return err
+}
+
 const deleteDocument = `-- name: DeleteDocument :one
 DELETE FROM document
 WHERE owner = $1
@@ -96,6 +116,256 @@ func (q *Queries) DeleteProperty(ctx context.Context, arg DeletePropertyParams) 
 	return column_1, err
 }
 
+const ensureSchema = `-- name: EnsureSchema :exec
+INSERT INTO document_schema (name, version, spec, usage)
+VALUES ($1, $2, $3, $4)
+ON CONFLICT (name, version) DO NOTHING
+`
+
+type EnsureSchemaParams struct {
+	Name    string
+	Version string
+	Spec    []byte
+	Usage   SchemaUsage
+}
+
+func (q *Queries) EnsureSchema(ctx context.Context, arg EnsureSchemaParams) error {
+	_, err := q.db.Exec(ctx, ensureSchema,
+		arg.Name,
+		arg.Version,
+		arg.Spec,
+		arg.Usage,
+	)
+	return err
+}
+
+const getActiveConfigGeneration = `-- name: GetActiveConfigGeneration :one
+SELECT id, identity_hash, description, created_at, activated_at, active
+FROM config_generation
+WHERE active
+`
+
+func (q *Queries) GetActiveConfigGeneration(ctx context.Context) (ConfigGeneration, error) {
+	row := q.db.QueryRow(ctx, getActiveConfigGeneration)
+	var i ConfigGeneration
+	err := row.Scan(
+		&i.ID,
+		&i.IdentityHash,
+		&i.Description,
+		&i.CreatedAt,
+		&i.ActivatedAt,
+		&i.Active,
+	)
+	return i, err
+}
+
+const getActiveSchema = `-- name: GetActiveSchema :one
+SELECT ds.name, ds.version, ds.spec, ds.usage
+FROM config_generation AS cg
+     INNER JOIN config_generation_schema AS cgs
+           ON cgs.generation_id = cg.id
+     INNER JOIN document_schema AS ds
+           ON ds.name = cgs.name AND ds.version = cgs.version
+WHERE cg.active AND cgs.name = $1
+`
+
+func (q *Queries) GetActiveSchema(ctx context.Context, name string) (DocumentSchema, error) {
+	row := q.db.QueryRow(ctx, getActiveSchema, name)
+	var i DocumentSchema
+	err := row.Scan(
+		&i.Name,
+		&i.Version,
+		&i.Spec,
+		&i.Usage,
+	)
+	return i, err
+}
+
+const getActiveSchemas = `-- name: GetActiveSchemas :many
+SELECT cgs.name, cgs.version, ds.spec, ds.usage
+FROM config_generation AS cg
+     INNER JOIN config_generation_schema AS cgs
+           ON cgs.generation_id = cg.id
+     INNER JOIN document_schema AS ds
+           ON ds.name = cgs.name AND ds.version = cgs.version
+WHERE cg.active
+ORDER BY cgs.ordinal
+`
+
+type GetActiveSchemasRow struct {
+	Name    string
+	Version string
+	Spec    []byte
+	Usage   SchemaUsage
+}
+
+func (q *Queries) GetActiveSchemas(ctx context.Context) ([]GetActiveSchemasRow, error) {
+	rows, err := q.db.Query(ctx, getActiveSchemas)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []GetActiveSchemasRow
+	for rows.Next() {
+		var i GetActiveSchemasRow
+		if err := rows.Scan(
+			&i.Name,
+			&i.Version,
+			&i.Spec,
+			&i.Usage,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const getConfigGeneration = `-- name: GetConfigGeneration :one
+SELECT id, identity_hash, description, created_at, activated_at, active
+FROM config_generation
+WHERE id = $1
+`
+
+func (q *Queries) GetConfigGeneration(ctx context.Context, id int64) (ConfigGeneration, error) {
+	row := q.db.QueryRow(ctx, getConfigGeneration, id)
+	var i ConfigGeneration
+	err := row.Scan(
+		&i.ID,
+		&i.IdentityHash,
+		&i.Description,
+		&i.CreatedAt,
+		&i.ActivatedAt,
+		&i.Active,
+	)
+	return i, err
+}
+
+const getConfigGenerationByIdentityHash = `-- name: GetConfigGenerationByIdentityHash :one
+SELECT id, identity_hash, description, created_at, activated_at, active
+FROM config_generation
+WHERE identity_hash = $1
+`
+
+func (q *Queries) GetConfigGenerationByIdentityHash(ctx context.Context, identityHash string) (ConfigGeneration, error) {
+	row := q.db.QueryRow(ctx, getConfigGenerationByIdentityHash, identityHash)
+	var i ConfigGeneration
+	err := row.Scan(
+		&i.ID,
+		&i.IdentityHash,
+		&i.Description,
+		&i.CreatedAt,
+		&i.ActivatedAt,
+		&i.Active,
+	)
+	return i, err
+}
+
+const getConfigGenerationSchemas = `-- name: GetConfigGenerationSchemas :many
+SELECT cgs.name, cgs.version, ds.usage
+FROM config_generation_schema AS cgs
+     INNER JOIN document_schema AS ds
+           ON ds.name = cgs.name AND ds.version = cgs.version
+WHERE cgs.generation_id = $1
+ORDER BY cgs.ordinal
+`
+
+type GetConfigGenerationSchemasRow struct {
+	Name    string
+	Version string
+	Usage   SchemaUsage
+}
+
+func (q *Queries) GetConfigGenerationSchemas(ctx context.Context, generationID int64) ([]GetConfigGenerationSchemasRow, error) {
+	rows, err := q.db.Query(ctx, getConfigGenerationSchemas, generationID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []GetConfigGenerationSchemasRow
+	for rows.Next() {
+		var i GetConfigGenerationSchemasRow
+		if err := rows.Scan(&i.Name, &i.Version, &i.Usage); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const getConfigGenerationSchemasWithSpec = `-- name: GetConfigGenerationSchemasWithSpec :many
+SELECT cgs.name, cgs.version, ds.spec, ds.usage
+FROM config_generation_schema AS cgs
+     INNER JOIN document_schema AS ds
+           ON ds.name = cgs.name AND ds.version = cgs.version
+WHERE cgs.generation_id = $1
+ORDER BY cgs.ordinal
+`
+
+type GetConfigGenerationSchemasWithSpecRow struct {
+	Name    string
+	Version string
+	Spec    []byte
+	Usage   SchemaUsage
+}
+
+func (q *Queries) GetConfigGenerationSchemasWithSpec(ctx context.Context, generationID int64) ([]GetConfigGenerationSchemasWithSpecRow, error) {
+	rows, err := q.db.Query(ctx, getConfigGenerationSchemasWithSpec, generationID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []GetConfigGenerationSchemasWithSpecRow
+	for rows.Next() {
+		var i GetConfigGenerationSchemasWithSpecRow
+		if err := rows.Scan(
+			&i.Name,
+			&i.Version,
+			&i.Spec,
+			&i.Usage,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const getDeprecations = `-- name: GetDeprecations :many
+SELECT label, enforced
+FROM deprecation
+ORDER BY label
+`
+
+func (q *Queries) GetDeprecations(ctx context.Context) ([]Deprecation, error) {
+	rows, err := q.db.Query(ctx, getDeprecations)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Deprecation
+	for rows.Next() {
+		var i Deprecation
+		if err := rows.Scan(&i.Label, &i.Enforced); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const getDocument = `-- name: GetDocument :one
 SELECT owner, application, type, key, version, schema_version,
        title, created, updated, updated_by, payload
@@ -135,6 +405,32 @@ func (q *Queries) GetDocument(ctx context.Context, arg GetDocumentParams) (Docum
 		&i.Payload,
 	)
 	return i, err
+}
+
+const getEnforcedDeprecations = `-- name: GetEnforcedDeprecations :many
+SELECT label
+FROM deprecation
+WHERE enforced
+`
+
+func (q *Queries) GetEnforcedDeprecations(ctx context.Context) ([]string, error) {
+	rows, err := q.db.Query(ctx, getEnforcedDeprecations)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []string
+	for rows.Next() {
+		var label string
+		if err := rows.Scan(&label); err != nil {
+			return nil, err
+		}
+		items = append(items, label)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const getEventLogEntriesAfterId = `-- name: GetEventLogEntriesAfterId :many
@@ -285,6 +581,76 @@ func (q *Queries) GetProperties(ctx context.Context, arg GetPropertiesParams) ([
 	return items, nil
 }
 
+const getSchema = `-- name: GetSchema :one
+SELECT name, version, spec, usage
+FROM document_schema
+WHERE name = $1 AND version = $2
+`
+
+type GetSchemaParams struct {
+	Name    string
+	Version string
+}
+
+func (q *Queries) GetSchema(ctx context.Context, arg GetSchemaParams) (DocumentSchema, error) {
+	row := q.db.QueryRow(ctx, getSchema, arg.Name, arg.Version)
+	var i DocumentSchema
+	err := row.Scan(
+		&i.Name,
+		&i.Version,
+		&i.Spec,
+		&i.Usage,
+	)
+	return i, err
+}
+
+const insertConfigGeneration = `-- name: InsertConfigGeneration :one
+INSERT INTO config_generation (identity_hash, description)
+VALUES ($1, $2)
+RETURNING id, identity_hash, description, created_at, activated_at, active
+`
+
+type InsertConfigGenerationParams struct {
+	IdentityHash string
+	Description  string
+}
+
+func (q *Queries) InsertConfigGeneration(ctx context.Context, arg InsertConfigGenerationParams) (ConfigGeneration, error) {
+	row := q.db.QueryRow(ctx, insertConfigGeneration, arg.IdentityHash, arg.Description)
+	var i ConfigGeneration
+	err := row.Scan(
+		&i.ID,
+		&i.IdentityHash,
+		&i.Description,
+		&i.CreatedAt,
+		&i.ActivatedAt,
+		&i.Active,
+	)
+	return i, err
+}
+
+const insertConfigGenerationSchema = `-- name: InsertConfigGenerationSchema :exec
+INSERT INTO config_generation_schema (generation_id, name, version, ordinal)
+VALUES ($1, $2, $3, $4)
+`
+
+type InsertConfigGenerationSchemaParams struct {
+	GenerationID int64
+	Name         string
+	Version      string
+	Ordinal      int32
+}
+
+func (q *Queries) InsertConfigGenerationSchema(ctx context.Context, arg InsertConfigGenerationSchemaParams) error {
+	_, err := q.db.Exec(ctx, insertConfigGenerationSchema,
+		arg.GenerationID,
+		arg.Name,
+		arg.Version,
+		arg.Ordinal,
+	)
+	return err
+}
+
 const insertEventLog = `-- name: InsertEventLog :one
 INSERT INTO eventlog (
       owner, type, resource_kind, application, document_type,
@@ -395,6 +761,46 @@ func (q *Queries) InsertMessage(ctx context.Context, arg InsertMessageParams) er
 		arg.Payload,
 	)
 	return err
+}
+
+const listConfigGenerations = `-- name: ListConfigGenerations :many
+SELECT id, identity_hash, description, created_at, activated_at, active
+FROM config_generation
+WHERE ($1::bigint = 0 OR id < $1::bigint)
+ORDER BY id DESC
+LIMIT $2::bigint
+`
+
+type ListConfigGenerationsParams struct {
+	Before   int64
+	PageSize int64
+}
+
+func (q *Queries) ListConfigGenerations(ctx context.Context, arg ListConfigGenerationsParams) ([]ConfigGeneration, error) {
+	rows, err := q.db.Query(ctx, listConfigGenerations, arg.Before, arg.PageSize)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ConfigGeneration
+	for rows.Next() {
+		var i ConfigGeneration
+		if err := rows.Scan(
+			&i.ID,
+			&i.IdentityHash,
+			&i.Description,
+			&i.CreatedAt,
+			&i.ActivatedAt,
+			&i.Active,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const listDocumentsFull = `-- name: ListDocumentsFull :many
@@ -664,6 +1070,22 @@ type UpdateInboxMessageParams struct {
 
 func (q *Queries) UpdateInboxMessage(ctx context.Context, arg UpdateInboxMessageParams) error {
 	_, err := q.db.Exec(ctx, updateInboxMessage, arg.IsRead, arg.Recipient, arg.ID)
+	return err
+}
+
+const upsertDeprecation = `-- name: UpsertDeprecation :exec
+INSERT INTO deprecation (label, enforced)
+VALUES ($1, $2)
+ON CONFLICT (label) DO UPDATE SET enforced = excluded.enforced
+`
+
+type UpsertDeprecationParams struct {
+	Label    string
+	Enforced bool
+}
+
+func (q *Queries) UpsertDeprecation(ctx context.Context, arg UpsertDeprecationParams) error {
+	_, err := q.db.Exec(ctx, upsertDeprecation, arg.Label, arg.Enforced)
 	return err
 }
 

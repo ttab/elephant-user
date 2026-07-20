@@ -95,6 +95,48 @@ func (ns NullResourceKind) Value() (driver.Value, error) {
 	return string(ns.ResourceKind), nil
 }
 
+type SchemaUsage string
+
+const (
+	SchemaUsageSettings SchemaUsage = "settings"
+	SchemaUsageMessages SchemaUsage = "messages"
+)
+
+func (e *SchemaUsage) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = SchemaUsage(s)
+	case string:
+		*e = SchemaUsage(s)
+	default:
+		return fmt.Errorf("unsupported scan type for SchemaUsage: %T", src)
+	}
+	return nil
+}
+
+type NullSchemaUsage struct {
+	SchemaUsage SchemaUsage
+	Valid       bool // Valid is true if SchemaUsage is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullSchemaUsage) Scan(value interface{}) error {
+	if value == nil {
+		ns.SchemaUsage, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.SchemaUsage.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullSchemaUsage) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.SchemaUsage), nil
+}
+
 type UserKind string
 
 const (
@@ -138,6 +180,27 @@ func (ns NullUserKind) Value() (driver.Value, error) {
 	return string(ns.UserKind), nil
 }
 
+type ConfigGeneration struct {
+	ID           int64
+	IdentityHash string
+	Description  string
+	CreatedAt    pgtype.Timestamptz
+	ActivatedAt  pgtype.Timestamptz
+	Active       bool
+}
+
+type ConfigGenerationSchema struct {
+	GenerationID int64
+	Name         string
+	Version      string
+	Ordinal      int32
+}
+
+type Deprecation struct {
+	Label    string
+	Enforced bool
+}
+
 type Document struct {
 	Owner         string
 	Application   string
@@ -150,6 +213,13 @@ type Document struct {
 	Updated       pgtype.Timestamptz
 	UpdatedBy     string
 	Payload       []byte
+}
+
+type DocumentSchema struct {
+	Name    string
+	Version string
+	Spec    []byte
+	Usage   SchemaUsage
 }
 
 type Eventlog struct {

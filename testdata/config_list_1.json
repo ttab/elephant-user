@@ -1,0 +1,46 @@
+{
+  "generations": [
+    {
+      "id": "2",
+      "description": "extra settings schema",
+      "active": true,
+      "created": "2023-01-10T20:06:37+01:00",
+      "activated": "2023-01-10T20:06:37+01:00",
+      "schemas": [
+        {
+          "name": "settings",
+          "version": "v1.0.0",
+          "usage": "SCHEMA_USAGE_SETTINGS"
+        },
+        {
+          "name": "messages",
+          "version": "v1.0.0",
+          "usage": "SCHEMA_USAGE_MESSAGES"
+        },
+        {
+          "name": "test-settings-extra",
+          "version": "v1.0.0",
+          "usage": "SCHEMA_USAGE_SETTINGS"
+        }
+      ]
+    },
+    {
+      "id": "1",
+      "description": "embedded schemas",
+      "created": "2023-01-10T20:06:37+01:00",
+      "activated": "2023-01-10T20:06:37+01:00",
+      "schemas": [
+        {
+          "name": "settings",
+          "version": "v1.0.0",
+          "usage": "SCHEMA_USAGE_SETTINGS"
+        },
+        {
+          "name": "messages",
+          "version": "v1.0.0",
+          "usage": "SCHEMA_USAGE_MESSAGES"
+        }
+      ]
+    }
+  ]
+}

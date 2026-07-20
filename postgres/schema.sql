@@ -2,6 +2,7 @@
 -- PostgreSQL database dump
 --
 
+
 -- Dumped from database version 17.7 (Debian 17.7-3.pgdg12+1)
 -- Dumped by pg_dump version 17.7 (Debian 17.7-3.pgdg12+1)
 
@@ -38,6 +39,16 @@ CREATE TYPE public.resource_kind AS ENUM (
 
 
 --
+-- Name: schema_usage; Type: TYPE; Schema: public; Owner: -
+--
+
+CREATE TYPE public.schema_usage AS ENUM (
+    'settings',
+    'messages'
+);
+
+
+--
 -- Name: user_kind; Type: TYPE; Schema: public; Owner: -
 --
 
@@ -51,6 +62,56 @@ CREATE TYPE public.user_kind AS ENUM (
 SET default_tablespace = '';
 
 SET default_table_access_method = heap;
+
+--
+-- Name: config_generation; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.config_generation (
+    id bigint NOT NULL,
+    identity_hash text NOT NULL,
+    description text DEFAULT ''::text NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    activated_at timestamp with time zone,
+    active boolean DEFAULT false NOT NULL
+);
+
+
+--
+-- Name: config_generation_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+--
+
+ALTER TABLE public.config_generation ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
+    SEQUENCE NAME public.config_generation_id_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1
+);
+
+
+--
+-- Name: config_generation_schema; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.config_generation_schema (
+    generation_id bigint NOT NULL,
+    name text NOT NULL,
+    version text NOT NULL,
+    ordinal integer NOT NULL
+);
+
+
+--
+-- Name: deprecation; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.deprecation (
+    label text NOT NULL,
+    enforced boolean DEFAULT false NOT NULL
+);
+
 
 --
 -- Name: document; Type: TABLE; Schema: public; Owner: -
@@ -68,6 +129,18 @@ CREATE TABLE public.document (
     updated timestamp with time zone DEFAULT now() NOT NULL,
     updated_by text NOT NULL,
     payload jsonb NOT NULL
+);
+
+
+--
+-- Name: document_schema; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.document_schema (
+    name text NOT NULL,
+    version text NOT NULL,
+    spec jsonb NOT NULL,
+    usage public.schema_usage NOT NULL
 );
 
 
@@ -193,11 +266,51 @@ CREATE TABLE public."user" (
 
 
 --
+-- Name: config_generation config_generation_identity_hash_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.config_generation
+    ADD CONSTRAINT config_generation_identity_hash_key UNIQUE (identity_hash);
+
+
+--
+-- Name: config_generation config_generation_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.config_generation
+    ADD CONSTRAINT config_generation_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: config_generation_schema config_generation_schema_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.config_generation_schema
+    ADD CONSTRAINT config_generation_schema_pkey PRIMARY KEY (generation_id, name);
+
+
+--
+-- Name: deprecation deprecation_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.deprecation
+    ADD CONSTRAINT deprecation_pkey PRIMARY KEY (label);
+
+
+--
 -- Name: document document_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.document
     ADD CONSTRAINT document_pkey PRIMARY KEY (owner, application, type, key);
+
+
+--
+-- Name: document_schema document_schema_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.document_schema
+    ADD CONSTRAINT document_schema_pkey PRIMARY KEY (name, version);
 
 
 --
@@ -257,10 +370,33 @@ ALTER TABLE ONLY public."user"
 
 
 --
+-- Name: config_generation_single_active; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX config_generation_single_active ON public.config_generation USING btree (active) WHERE active;
+
+
+--
 -- Name: eventlog_owner_id_idx; Type: INDEX; Schema: public; Owner: -
 --
 
 CREATE INDEX eventlog_owner_id_idx ON public.eventlog USING btree (owner, id);
+
+
+--
+-- Name: config_generation_schema config_generation_schema_generation_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.config_generation_schema
+    ADD CONSTRAINT config_generation_schema_generation_id_fkey FOREIGN KEY (generation_id) REFERENCES public.config_generation(id) ON DELETE CASCADE;
+
+
+--
+-- Name: config_generation_schema config_generation_schema_name_version_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.config_generation_schema
+    ADD CONSTRAINT config_generation_schema_name_version_fkey FOREIGN KEY (name, version) REFERENCES public.document_schema(name, version);
 
 
 --
@@ -306,4 +442,5 @@ ALTER TABLE ONLY public.property
 --
 -- PostgreSQL database dump complete
 --
+
 

@@ -25,6 +25,8 @@ const (
 	NotifyChannelMessageUpdate      NotifyChannel = "message_update"
 	NotifyChannelInboxMessageUpdate NotifyChannel = "inbox_message_update"
 	NotifyChannelEventLogUpdate     NotifyChannel = "event_log_update"
+	NotifyChannelSchemaUpdate       NotifyChannel = "schema_update"
+	NotifyChannelDeprecationUpdate  NotifyChannel = "deprecation_update"
 )
 
 type PGStore struct {
@@ -35,6 +37,8 @@ type PGStore struct {
 	Messages      *pg.FanOut[MessageEvent]
 	InboxMessages *pg.FanOut[MessageEvent]
 	EventLog      *pg.FanOut[EventLogEvent]
+	Schemas       *pg.FanOut[SchemaEvent]
+	Deprecations  *pg.FanOut[DeprecationEvent]
 }
 
 // Interface guard.
@@ -51,6 +55,8 @@ func NewPGStore(
 		Messages:      pg.NewFanOut[MessageEvent](NotifyChannelMessageUpdate),
 		InboxMessages: pg.NewFanOut[MessageEvent](NotifyChannelInboxMessageUpdate),
 		EventLog:      pg.NewFanOut[EventLogEvent](NotifyChannelEventLogUpdate),
+		Schemas:       pg.NewFanOut[SchemaEvent](NotifyChannelSchemaUpdate),
+		Deprecations:  pg.NewFanOut[DeprecationEvent](NotifyChannelDeprecationUpdate),
 	}
 }
 
@@ -61,6 +67,8 @@ func (s *PGStore) RunSubscriber(ctx context.Context, pool *pgxpool.Pool) {
 		s.Messages,
 		s.InboxMessages,
 		s.EventLog,
+		s.Schemas,
+		s.Deprecations,
 	}).Run(ctx)
 	if err != nil && !errors.Is(err, context.Canceled) {
 		s.logger.ErrorContext(ctx, "pg notification subscriber stopped",

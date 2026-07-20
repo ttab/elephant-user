@@ -14,6 +14,8 @@ import (
 	"github.com/joho/godotenv"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/ttab/elephant-user/internal"
+	"github.com/ttab/elephant-user/postgres"
+	"github.com/ttab/elephant-user/schema"
 	"github.com/ttab/elephantine"
 	"github.com/urfave/cli/v3"
 )
@@ -73,6 +75,13 @@ func main() {
 				Usage:   "CORS hosts to allow, supports wildcards",
 				Sources: cli.EnvVars("CORS_HOSTS"),
 			},
+			&cli.BoolFlag{
+				Name: "migrate-db",
+				Usage: `Perform database migrations.
+Intended for bootstrapping disposable environments. Having this always on in
+production is a BAD IDEA! Migrations can be expensive and need to be planned.`,
+				Sources: cli.EnvVars("MIGRATE_DB"),
+			},
 		},
 	}
 
@@ -104,6 +113,7 @@ func runUser(ctx context.Context, cmd *cli.Command) error {
 		connString        = cmd.String("db")
 		bouncerConnString = cmd.String("db-bouncer")
 		corsHosts         = cmd.StringSlice("cors-host")
+		migrateDB         = cmd.Bool("migrate-db")
 	)
 
 	logger := elephantine.SetUpLogger(logLevel, os.Stdout)
@@ -152,6 +162,17 @@ func runUser(ctx context.Context, cmd *cli.Command) error {
 		}
 	}
 
+	if migrateDB {
+		logger.Info("migrating database schema")
+
+		// Migrate using the direct connection, tern doesn't play
+		// well with transaction pooling.
+		err = internal.Migrate(ctx, pubsubPool, schema.Migrations)
+		if err != nil {
+			return fmt.Errorf("migrate database: %w", err)
+		}
+	}
+
 	auth, err := elephantine.AuthenticationConfigFromCLI(ctx, cmd, nil)
 	if err != nil {
 		return fmt.Errorf("set up authentication: %w", err)
@@ -163,7 +184,8 @@ func runUser(ctx context.Context, cmd *cli.Command) error {
 
 	go store.RunCleaner(ctx, 12*time.Hour)
 
-	validator, err := internal.NewValidator(ctx)
+	validator, err := internal.NewValidator(
+		ctx, logger, store, prometheus.DefaultRegisterer)
 	if err != nil {
 		return fmt.Errorf("create validator: %w", err)
 	}
@@ -179,17 +201,54 @@ func runUser(ctx context.Context, cmd *cli.Command) error {
 
 	server := elephantine.NewAPIServer(logger, addr, profileAddr, serverOpts...)
 
+	// Report schema state as part of readiness without failing the
+	// probe: a freshly deployed service must be able to accept config
+	// generation registrations through its own API.
+	server.Health.AddOptionalReadyFunction("schemas",
+		func(ctx context.Context) error {
+			return schemasReadyCheck(ctx, store)
+		})
+
 	service := internal.NewService(logger, store, validator)
+	configurationService := internal.NewConfigurationService(logger, store)
 
 	err = internal.Run(ctx, internal.Parameters{
-		Logger:         logger,
-		APIServer:      server,
-		AuthInfoParser: auth.AuthParser,
-		Registerer:     prometheus.DefaultRegisterer,
-		Service:        service,
+		Logger:               logger,
+		APIServer:            server,
+		AuthInfoParser:       auth.AuthParser,
+		Registerer:           prometheus.DefaultRegisterer,
+		Service:              service,
+		ConfigurationService: configurationService,
 	})
 	if err != nil {
 		return fmt.Errorf("run application: %w", err)
+	}
+
+	return nil
+}
+
+// schemasReadyCheck reports whether the active config generation has
+// schemas for both settings and messages.
+func schemasReadyCheck(ctx context.Context, store *internal.PGStore) error {
+	schemas, err := store.GetActiveSchemas(ctx)
+	if err != nil {
+		return fmt.Errorf("get active generation schemas: %w", err)
+	}
+
+	found := make(map[postgres.SchemaUsage]bool)
+
+	for _, schema := range schemas {
+		found[schema.Usage] = true
+	}
+
+	for _, usage := range []postgres.SchemaUsage{
+		postgres.SchemaUsageSettings,
+		postgres.SchemaUsageMessages,
+	} {
+		if !found[usage] {
+			return fmt.Errorf(
+				"no active schema for usage %q", usage)
+		}
 	}
 
 	return nil

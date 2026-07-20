@@ -12,11 +12,12 @@ import (
 )
 
 type Parameters struct {
-	Logger         *slog.Logger
-	APIServer      *elephantine.APIServer
-	AuthInfoParser elephantine.AuthInfoParser
-	Registerer     prometheus.Registerer
-	Service        *Service
+	Logger               *slog.Logger
+	APIServer            *elephantine.APIServer
+	AuthInfoParser       elephantine.AuthInfoParser
+	Registerer           prometheus.Registerer
+	Service              *Service
+	ConfigurationService *ConfigurationService
 }
 
 func Run(ctx context.Context, p Parameters) error {
@@ -32,9 +33,12 @@ func Run(ctx context.Context, p Parameters) error {
 
 	messagesServer := user.NewMessagesServer(p.Service, opts.ServerOptions())
 	settingsServer := user.NewSettingsServer(p.Service, opts.ServerOptions())
+	configurationServer := user.NewConfigurationServer(
+		p.ConfigurationService, opts.ServerOptions())
 
 	p.APIServer.RegisterAPI(messagesServer, opts)
 	p.APIServer.RegisterAPI(settingsServer, opts)
+	p.APIServer.RegisterAPI(configurationServer, opts)
 
 	grp := elephantine.NewErrGroup(ctx, p.Logger)
 
