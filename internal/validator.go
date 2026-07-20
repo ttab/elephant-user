@@ -21,10 +21,10 @@ const (
 	LogKeyEntityRef        = "entity_ref"
 )
 
-//go:embed schema_messages.json
+//go:embed se.ecms.user.messages.json
 var schemaMessages []byte
 
-//go:embed schema_settings.json
+//go:embed se.ecms.user.settings.json
 var schemaSettings []byte
 
 // EmbeddedConfigSchemas returns the embedded constraint sets as
@@ -32,13 +32,13 @@ var schemaSettings []byte
 func EmbeddedConfigSchemas() []ConfigSchema {
 	return []ConfigSchema{
 		{
-			Name:    "settings",
+			Name:    "se.ecms.user.settings",
 			Version: "v1.0.0",
 			Spec:    schemaSettings,
 			Usage:   postgres.SchemaUsageSettings,
 		},
 		{
-			Name:    "messages",
+			Name:    "se.ecms.user.messages",
 			Version: "v1.0.0",
 			Spec:    schemaMessages,
 			Usage:   postgres.SchemaUsageMessages,

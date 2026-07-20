@@ -27,4 +27,4 @@ The service implements a multi-tier access model based on JWT claims for documen
 
 Setting documents and inbox messages are validated against [revisor](https://github.com/ttab/revisor) constraint sets stored in Postgres and managed through the `Configuration` API. Schemas are grouped into config generations that are registered and switched atomically, and running instances hot-reload their validators when the active generation changes. Each schema declares a usage — `settings` or `messages` — deciding what it validates.
 
-Schema deprecations can be toggled per label: unenforced uses are logged and counted, enforced ones block writes. The embedded `internal/schema_*.json` constraint sets remain as seed fixtures for bootstrapping and tests.
+Schema deprecations can be toggled per label: unenforced uses are logged and counted, enforced ones block writes. The embedded `internal/se.ecms.user.*.json` constraint sets remain as seed fixtures for bootstrapping and tests.

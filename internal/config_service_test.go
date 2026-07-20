@@ -115,12 +115,12 @@ func TestConfiguration(t *testing.T) {
 			Description: "extra settings schema",
 			Schemas: []*user.ConfigGenerationSchema{
 				{
-					Name:    "settings",
+					Name:    "se.ecms.user.settings",
 					Version: "v1.0.0",
 					Usage:   user.SchemaUsage_SCHEMA_USAGE_SETTINGS,
 				},
 				{
-					Name:    "messages",
+					Name:    "se.ecms.user.messages",
 					Version: "v1.0.0",
 					Usage:   user.SchemaUsage_SCHEMA_USAGE_MESSAGES,
 				},
@@ -210,7 +210,7 @@ func TestConfiguration(t *testing.T) {
 		&user.RegisterConfigGenerationRequest{
 			Schemas: []*user.ConfigGenerationSchema{
 				{
-					Name:    "settings",
+					Name:    "se.ecms.user.settings",
 					Version: "v1.0.0",
 					Spec:    extraSettingsSpec,
 					Usage:   user.SchemaUsage_SCHEMA_USAGE_SETTINGS,
@@ -235,12 +235,12 @@ func TestConfiguration(t *testing.T) {
 		&user.RegisterConfigGenerationRequest{
 			Schemas: []*user.ConfigGenerationSchema{
 				{
-					Name:    "settings",
+					Name:    "se.ecms.user.settings",
 					Version: "v1.0.0",
 					Usage:   user.SchemaUsage_SCHEMA_USAGE_SETTINGS,
 				},
 				{
-					Name:    "settings",
+					Name:    "se.ecms.user.settings",
 					Version: "v1.0.0",
 					Usage:   user.SchemaUsage_SCHEMA_USAGE_SETTINGS,
 				},
@@ -328,7 +328,7 @@ func TestConfiguration(t *testing.T) {
 
 	schemaRes, err := eu.Configuration.GetSchema(readCtx,
 		&user.GetSchemaRequest{
-			Name: "settings",
+			Name: "se.ecms.user.settings",
 		})
 	test.Must(t, err, "get active settings schema")
 
@@ -373,12 +373,12 @@ func TestConfiguration(t *testing.T) {
 			Activate:    true,
 			Schemas: []*user.ConfigGenerationSchema{
 				{
-					Name:    "settings",
+					Name:    "se.ecms.user.settings",
 					Version: "v1.0.0",
 					Usage:   user.SchemaUsage_SCHEMA_USAGE_SETTINGS,
 				},
 				{
-					Name:    "messages",
+					Name:    "se.ecms.user.messages",
 					Version: "v1.0.0",
 					Usage:   user.SchemaUsage_SCHEMA_USAGE_MESSAGES,
 				},
