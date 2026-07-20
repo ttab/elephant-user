@@ -100,11 +100,10 @@ func TestConfiguration(t *testing.T) {
 	// The seeded generation with the embedded schemas should be active.
 	active1, err := eu.Configuration.GetActiveConfigGeneration(readCtx,
 		&user.GetActiveConfigGenerationRequest{})
-	test.Must(t, err, "get active config generation")
+	test.Mustf(t, err, "get active config generation")
 
-	test.TestMessageAgainstGolden(t, regenerate, active1,
-		filepath.Join(testData, "config_get_active_1.json"),
-		ignoreTimestamps)
+	test.MessageAgainstGolden(t, regenerate, active1,
+		filepath.Join(testData, "config_get_active_1.json"), ignoreTimestamps)
 
 	seededID := active1.Generation.Id
 
@@ -132,11 +131,10 @@ func TestConfiguration(t *testing.T) {
 				},
 			},
 		})
-	test.Must(t, err, "register second generation")
+	test.Mustf(t, err, "register second generation")
 
-	test.TestMessageAgainstGolden(t, regenerate, register1,
-		filepath.Join(testData, "config_register_1.json"),
-		ignoreTimestamps)
+	test.MessageAgainstGolden(t, regenerate, register1,
+		filepath.Join(testData, "config_register_1.json"), ignoreTimestamps)
 
 	extraGenID := register1.Generation.Id
 
@@ -151,7 +149,7 @@ func TestConfiguration(t *testing.T) {
 			Description: "this description is ignored",
 			Schemas:     register1.Generation.Schemas,
 		})
-	test.Must(t, err, "re-register second generation")
+	test.Mustf(t, err, "re-register second generation")
 
 	if register2.Generation.Id != extraGenID {
 		t.Fatalf("re-registration returned generation %d, expected %d",
@@ -251,18 +249,17 @@ func TestConfiguration(t *testing.T) {
 	// Documents of a type that only the inactive extra generation
 	// declares must not validate yet.
 	_, err = eu.Settings.UpdateDocument(userCtx, hotReloadDocument())
-	test.MustNot(t, err, "update document with inactive schema type")
+	test.MustNotf(t, err, "update document with inactive schema type")
 
 	// Activate the extra generation and refresh the validator.
 	activate1, err := eu.Configuration.ActivateConfigGeneration(adminCtx,
 		&user.ActivateConfigGenerationRequest{
 			Id: extraGenID,
 		})
-	test.Must(t, err, "activate second generation")
+	test.Mustf(t, err, "activate second generation")
 
-	test.TestMessageAgainstGolden(t, regenerate, activate1,
-		filepath.Join(testData, "config_activate_1.json"),
-		ignoreTimestamps)
+	test.MessageAgainstGolden(t, regenerate, activate1,
+		filepath.Join(testData, "config_activate_1.json"), ignoreTimestamps)
 
 	_, err = eu.Configuration.ActivateConfigGeneration(adminCtx,
 		&user.ActivateConfigGenerationRequest{
@@ -271,10 +268,10 @@ func TestConfiguration(t *testing.T) {
 	test.IsTwirpError(t, err, twirp.NotFound)
 
 	err = eu.Validator.RefreshSchemas(ctx)
-	test.Must(t, err, "refresh schemas")
+	test.Mustf(t, err, "refresh schemas")
 
 	_, err = eu.Settings.UpdateDocument(userCtx, hotReloadDocument())
-	test.Must(t, err, "update document after schema activation")
+	test.Mustf(t, err, "update document after schema activation")
 
 	// A long-poll for changes to the already known active generation
 	// returns unchanged.
@@ -284,7 +281,7 @@ func TestConfiguration(t *testing.T) {
 			WaitSeconds: 1,
 			OnlyChanged: true,
 		})
-	test.Must(t, err, "long-poll unchanged active generation")
+	test.Mustf(t, err, "long-poll unchanged active generation")
 
 	if !unchanged.Unchanged {
 		t.Fatal("expected unchanged response for known active generation")
@@ -294,17 +291,16 @@ func TestConfiguration(t *testing.T) {
 
 	list1, err := eu.Configuration.ListConfigGenerations(readCtx,
 		&user.ListConfigGenerationsRequest{})
-	test.Must(t, err, "list config generations")
+	test.Mustf(t, err, "list config generations")
 
-	test.TestMessageAgainstGolden(t, regenerate, list1,
-		filepath.Join(testData, "config_list_1.json"),
-		ignoreTimestamps)
+	test.MessageAgainstGolden(t, regenerate, list1,
+		filepath.Join(testData, "config_list_1.json"), ignoreTimestamps)
 
 	page1, err := eu.Configuration.ListConfigGenerations(readCtx,
 		&user.ListConfigGenerationsRequest{
 			PageSize: 1,
 		})
-	test.Must(t, err, "list config generations with page size")
+	test.Mustf(t, err, "list config generations with page size")
 
 	if len(page1.Generations) != 1 ||
 		page1.Generations[0].Id != extraGenID {
@@ -316,7 +312,7 @@ func TestConfiguration(t *testing.T) {
 		&user.ListConfigGenerationsRequest{
 			Before: extraGenID,
 		})
-	test.Must(t, err, "list config generations before the latest")
+	test.Mustf(t, err, "list config generations before the latest")
 
 	if len(page2.Generations) != 1 ||
 		page2.Generations[0].Id != seededID {
@@ -330,7 +326,7 @@ func TestConfiguration(t *testing.T) {
 		&user.GetSchemaRequest{
 			Name: "se.ecms.user.settings",
 		})
-	test.Must(t, err, "get active settings schema")
+	test.Mustf(t, err, "get active settings schema")
 
 	if schemaRes.Version != "v1.0.0" ||
 		schemaRes.Usage != user.SchemaUsage_SCHEMA_USAGE_SETTINGS {
@@ -359,7 +355,7 @@ func TestConfiguration(t *testing.T) {
 				WaitSeconds: 10,
 				OnlyChanged: true,
 			})
-		test.Must(t, err, "long-poll active generation")
+		test.Mustf(t, err, "long-poll active generation")
 
 		polled = res
 	})
@@ -390,7 +386,7 @@ func TestConfiguration(t *testing.T) {
 				},
 			},
 		})
-	test.Must(t, err, "register and activate third generation")
+	test.Mustf(t, err, "register and activate third generation")
 
 	deprecatedGenID := register3.Generation.Id
 
@@ -407,12 +403,12 @@ func TestConfiguration(t *testing.T) {
 	}
 
 	err = eu.Validator.RefreshSchemas(ctx)
-	test.Must(t, err, "refresh schemas after third generation")
+	test.Mustf(t, err, "refresh schemas after third generation")
 
 	// The extra settings type was not carried over to the third
 	// generation.
 	_, err = eu.Settings.UpdateDocument(userCtx, hotReloadDocument())
-	test.MustNot(t, err, "update document with type from replaced generation")
+	test.MustNotf(t, err, "update document with type from replaced generation")
 
 	// Usage separation: a settings document type must not validate as
 	// an inbox message.
@@ -424,16 +420,16 @@ func TestConfiguration(t *testing.T) {
 			Title: "Not an inbox message",
 		},
 	})
-	test.MustNot(t, err, "push settings document as inbox message")
+	test.MustNotf(t, err, "push settings document as inbox message")
 
 	// Deprecations: unenforced deprecations are counted but allowed.
 
 	_, err = eu.Settings.UpdateDocument(userCtx, deprecatedDocument())
-	test.Must(t, err, "update document with unenforced deprecation")
+	test.Mustf(t, err, "update document with unenforced deprecation")
 
 	count, err := testutil.GatherAndCount(eu.Registry,
 		"elephant_user_deprecations_total")
-	test.Must(t, err, "gather deprecation metrics")
+	test.Mustf(t, err, "gather deprecation metrics")
 
 	if count < 1 {
 		t.Fatal("expected the deprecation counter to have been counted")
@@ -455,21 +451,20 @@ func TestConfiguration(t *testing.T) {
 				Enforced: true,
 			},
 		})
-	test.Must(t, err, "enforce deprecation")
+	test.Mustf(t, err, "enforce deprecation")
 
 	err = eu.Validator.RefreshSchemas(ctx)
-	test.Must(t, err, "refresh schemas after enforcing deprecation")
+	test.Mustf(t, err, "refresh schemas after enforcing deprecation")
 
 	_, err = eu.Settings.UpdateDocument(userCtx, deprecatedDocument())
-	test.MustNot(t, err, "update document with enforced deprecation")
+	test.MustNotf(t, err, "update document with enforced deprecation")
 
 	deprecations, err := eu.Configuration.GetDeprecations(readCtx,
 		&user.GetDeprecationsRequest{})
-	test.Must(t, err, "get deprecations")
+	test.Mustf(t, err, "get deprecations")
 
-	test.TestMessageAgainstGolden(t, regenerate, deprecations,
-		filepath.Join(testData, "config_deprecations_1.json"),
-		ignoreTimestamps)
+	test.MessageAgainstGolden(t, regenerate, deprecations,
+		filepath.Join(testData, "config_deprecations_1.json"), ignoreTimestamps)
 
 	// Re-registering an existing inactive generation with activate set
 	// activates it.
@@ -478,7 +473,7 @@ func TestConfiguration(t *testing.T) {
 			Activate: true,
 			Schemas:  register1.Generation.Schemas,
 		})
-	test.Must(t, err, "re-register second generation with activate")
+	test.Mustf(t, err, "re-register second generation with activate")
 
 	if register4.Generation.Id != extraGenID || !register4.Generation.Active {
 		t.Fatalf(
