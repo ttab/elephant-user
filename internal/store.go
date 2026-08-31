@@ -29,6 +29,9 @@ const (
 	NotifyChannelDeprecationUpdate  NotifyChannel = "deprecation_update"
 )
 
+// sequenceEventLog is the sequence_counter row that hands out eventlog ids.
+const sequenceEventLog = "eventlog"
+
 type PGStore struct {
 	logger *slog.Logger
 	dbpool *pgxpool.Pool
@@ -270,6 +273,11 @@ func (s *PGStore) ListMessagesAfterID(
 func (s *PGStore) InsertInboxMessage(
 	ctx context.Context, message InboxMessage,
 ) (outErr error) {
+	payload, err := json.Marshal(message.Payload)
+	if err != nil {
+		return fmt.Errorf("marshal message payload: %w", err)
+	}
+
 	tx, err := s.dbpool.Begin(ctx)
 	if err != nil {
 		return fmt.Errorf("begin transaction: %w", err)
@@ -290,51 +298,22 @@ func (s *PGStore) InsertInboxMessage(
 		return fmt.Errorf("upsert user: %w", err)
 	}
 
-	var nextID int64
-
-	// Retry on primary key violation which can happen
-	// if another instance inserts the first message before this one.
-	for attempt := 0; attempt < 2; attempt++ {
-		lock, err := q.GetMessageWriteLock(ctx, postgres.GetMessageWriteLockParams{
-			Recipient:   message.Recipient,
-			MessageType: string(MessageTypeInbox),
-		})
-		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
-			return fmt.Errorf("get message lock: %w", err)
-		}
-
-		nextID = lock.CurrentMessageID.Int64 + 1
-
-		payload, err := json.Marshal(message.Payload)
-		if err != nil {
-			return fmt.Errorf("marshal message payload: %w", err)
-		}
-
-		err = q.InsertInboxMessage(ctx, postgres.InsertInboxMessageParams{
-			Recipient: message.Recipient,
-			ID:        nextID,
-			Created:   pg.Time(message.Created),
-			CreatedBy: message.CreatedBy,
-			Updated:   pg.Time(message.Updated),
-			IsRead:    message.IsRead,
-			Payload:   payload,
-		})
-		if err == nil {
-			break
-		}
-
-		if !pg.IsConstraintError(err, "inbox_message_pkey") {
-			return fmt.Errorf("insert inbox message: %w", err)
-		}
+	nextID, err := nextMessageID(ctx, q, message.Recipient, MessageTypeInbox)
+	if err != nil {
+		return err
 	}
 
-	err = q.UpsertMessageWriteLock(ctx, postgres.UpsertMessageWriteLockParams{
-		Recipient:        message.Recipient,
-		MessageType:      string(MessageTypeInbox),
-		CurrentMessageID: pg.BigintOrNull(nextID),
+	err = q.InsertInboxMessage(ctx, postgres.InsertInboxMessageParams{
+		Recipient: message.Recipient,
+		ID:        nextID,
+		Created:   pg.Time(message.Created),
+		CreatedBy: message.CreatedBy,
+		Updated:   pg.Time(message.Updated),
+		IsRead:    message.IsRead,
+		Payload:   payload,
 	})
 	if err != nil {
-		return fmt.Errorf("upsert message lock: %w", err)
+		return fmt.Errorf("insert inbox message: %w", err)
 	}
 
 	err = notifyInboxMessageUpdated(ctx, q, MessageEvent{
@@ -357,6 +336,11 @@ func (s *PGStore) InsertInboxMessage(
 func (s *PGStore) InsertMessage(
 	ctx context.Context, message Message,
 ) (outErr error) {
+	payload, err := json.Marshal(message.Payload)
+	if err != nil {
+		return fmt.Errorf("marshal message payload: %w", err)
+	}
+
 	tx, err := s.dbpool.Begin(ctx)
 	if err != nil {
 		return fmt.Errorf("begin transaction: %w", err)
@@ -377,52 +361,23 @@ func (s *PGStore) InsertMessage(
 		return fmt.Errorf("upsert user: %w", err)
 	}
 
-	var nextID int64
-
-	// Retry on primary key violation which can happen
-	// if another instance inserts the first message before this one.
-	for attempt := 0; attempt < 2; attempt++ {
-		lock, err := q.GetMessageWriteLock(ctx, postgres.GetMessageWriteLockParams{
-			Recipient:   message.Recipient,
-			MessageType: string(MessageTypeSystem),
-		})
-		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
-			return fmt.Errorf("get message lock: %w", err)
-		}
-
-		nextID = lock.CurrentMessageID.Int64 + 1
-
-		payload, err := json.Marshal(message.Payload)
-		if err != nil {
-			return fmt.Errorf("marshal message payload: %w", err)
-		}
-
-		err = q.InsertMessage(ctx, postgres.InsertMessageParams{
-			Recipient: message.Recipient,
-			ID:        nextID,
-			Type:      pg.TextOrNull(message.Type),
-			Created:   pg.Time(message.Created),
-			CreatedBy: message.CreatedBy,
-			DocUuid:   pg.PUUID(message.DocUUID),
-			DocType:   pg.TextOrNull(message.DocType),
-			Payload:   payload,
-		})
-		if err == nil {
-			break
-		}
-
-		if !pg.IsConstraintError(err, "message_pkey") {
-			return fmt.Errorf("insert message: %w", err)
-		}
+	nextID, err := nextMessageID(ctx, q, message.Recipient, MessageTypeSystem)
+	if err != nil {
+		return err
 	}
 
-	err = q.UpsertMessageWriteLock(ctx, postgres.UpsertMessageWriteLockParams{
-		Recipient:        message.Recipient,
-		MessageType:      string(MessageTypeSystem),
-		CurrentMessageID: pg.BigintOrNull(nextID),
+	err = q.InsertMessage(ctx, postgres.InsertMessageParams{
+		Recipient: message.Recipient,
+		ID:        nextID,
+		Type:      pg.TextOrNull(message.Type),
+		Created:   pg.Time(message.Created),
+		CreatedBy: message.CreatedBy,
+		DocUuid:   pg.PUUID(message.DocUUID),
+		DocType:   pg.TextOrNull(message.DocType),
+		Payload:   payload,
 	})
 	if err != nil {
-		return fmt.Errorf("upsert message lock: %w", err)
+		return fmt.Errorf("insert message: %w", err)
 	}
 
 	err = notifyMessageUpdated(ctx, q, MessageEvent{
@@ -439,6 +394,44 @@ func (s *PGStore) InsertMessage(
 	}
 
 	return nil
+}
+
+// nextMessageID allocates the next per-recipient message id. The lock row is
+// created on first use and then locked FOR UPDATE for the rest of the
+// transaction, which serializes writers per recipient and keeps ids gapless
+// and commit-ordered. The lock row is advanced to the returned id.
+func nextMessageID(
+	ctx context.Context, q *postgres.Queries,
+	recipient string, messageType MessageType,
+) (int64, error) {
+	err := q.EnsureMessageWriteLock(ctx, postgres.EnsureMessageWriteLockParams{
+		Recipient:   recipient,
+		MessageType: string(messageType),
+	})
+	if err != nil {
+		return 0, fmt.Errorf("ensure message lock: %w", err)
+	}
+
+	lock, err := q.GetMessageWriteLock(ctx, postgres.GetMessageWriteLockParams{
+		Recipient:   recipient,
+		MessageType: string(messageType),
+	})
+	if err != nil {
+		return 0, fmt.Errorf("get message lock: %w", err)
+	}
+
+	nextID := lock.CurrentMessageID.Int64 + 1
+
+	err = q.UpdateMessageWriteLock(ctx, postgres.UpdateMessageWriteLockParams{
+		Recipient:        recipient,
+		MessageType:      string(messageType),
+		CurrentMessageID: pg.BigintOrNull(nextID),
+	})
+	if err != nil {
+		return 0, fmt.Errorf("update message lock: %w", err)
+	}
+
+	return nextID, nil
 }
 
 // UpdateInboxMessage implements Store.
@@ -657,7 +650,10 @@ func (s *PGStore) DeleteDocument(
 		Type:        docType,
 		Key:         key,
 	})
-	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+	if errors.Is(err, pgx.ErrNoRows) {
+		// Nothing was deleted, so there is no change to log.
+		return nil
+	} else if err != nil {
 		return fmt.Errorf("delete document: %w", err)
 	}
 
@@ -859,11 +855,21 @@ func (s *PGStore) GetEventLogEntriesAfterID(
 	return events, nil
 }
 
+// logAndNotify appends an eventlog entry and notifies listeners. The id is
+// taken from the eventlog sequence counter, which row-locks the counter for
+// the rest of the transaction so that ids are handed out in commit order.
 func logAndNotify(
 	ctx context.Context, q *postgres.Queries,
 	params postgres.InsertEventLogParams,
 ) error {
-	id, err := q.InsertEventLog(ctx, params)
+	id, err := q.NextSequenceValue(ctx, sequenceEventLog)
+	if err != nil {
+		return fmt.Errorf("next eventlog id: %w", err)
+	}
+
+	params.ID = id
+
+	err = q.InsertEventLog(ctx, params)
 	if err != nil {
 		return fmt.Errorf("insert event log: %w", err)
 	}

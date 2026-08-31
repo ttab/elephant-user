@@ -283,6 +283,11 @@ type SchemaVersion struct {
 	Version int32
 }
 
+type SequenceCounter struct {
+	Name  string
+	Value int64
+}
+
 type User struct {
 	Sub     string
 	Created pgtype.Timestamptz

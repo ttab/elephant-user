@@ -164,20 +164,6 @@ CREATE TABLE public.eventlog (
 
 
 --
--- Name: eventlog_id_seq; Type: SEQUENCE; Schema: public; Owner: -
---
-
-ALTER TABLE public.eventlog ALTER COLUMN id ADD GENERATED ALWAYS AS IDENTITY (
-    SEQUENCE NAME public.eventlog_id_seq
-    START WITH 1
-    INCREMENT BY 1
-    NO MINVALUE
-    NO MAXVALUE
-    CACHE 1
-);
-
-
---
 -- Name: inbox_message; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -251,6 +237,16 @@ CREATE TABLE public.property (
 
 CREATE TABLE public.schema_version (
     version integer NOT NULL
+);
+
+
+--
+-- Name: sequence_counter; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.sequence_counter (
+    name text NOT NULL,
+    value bigint NOT NULL
 );
 
 
@@ -359,6 +355,14 @@ ALTER TABLE ONLY public.message_write_lock
 
 ALTER TABLE ONLY public.property
     ADD CONSTRAINT property_pkey PRIMARY KEY (owner, application, key);
+
+
+--
+-- Name: sequence_counter sequence_counter_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.sequence_counter
+    ADD CONSTRAINT sequence_counter_pkey PRIMARY KEY (name);
 
 
 --
