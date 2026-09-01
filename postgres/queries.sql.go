@@ -116,25 +116,6 @@ func (q *Queries) DeleteProperty(ctx context.Context, arg DeletePropertyParams) 
 	return column_1, err
 }
 
-const ensureMessageWriteLock = `-- name: EnsureMessageWriteLock :exec
-INSERT INTO message_write_lock(
-      recipient, message_type, current_message_id
-) VALUES (
-      $1, $2, 0
-)
-ON CONFLICT(recipient, message_type) DO NOTHING
-`
-
-type EnsureMessageWriteLockParams struct {
-	Recipient   string
-	MessageType string
-}
-
-func (q *Queries) EnsureMessageWriteLock(ctx context.Context, arg EnsureMessageWriteLockParams) error {
-	_, err := q.db.Exec(ctx, ensureMessageWriteLock, arg.Recipient, arg.MessageType)
-	return err
-}
-
 const ensureSchema = `-- name: EnsureSchema :exec
 INSERT INTO document_schema (name, version, spec, usage)
 VALUES ($1, $2, $3, $4)
@@ -539,26 +520,6 @@ func (q *Queries) GetLatestMessageId(ctx context.Context, recipient string) (int
 	return latest_id, err
 }
 
-const getMessageWriteLock = `-- name: GetMessageWriteLock :one
-SELECT recipient, message_type, current_message_id
-FROM message_write_lock
-WHERE recipient = $1
-      AND message_type = $2
-FOR UPDATE
-`
-
-type GetMessageWriteLockParams struct {
-	Recipient   string
-	MessageType string
-}
-
-func (q *Queries) GetMessageWriteLock(ctx context.Context, arg GetMessageWriteLockParams) (MessageWriteLock, error) {
-	row := q.db.QueryRow(ctx, getMessageWriteLock, arg.Recipient, arg.MessageType)
-	var i MessageWriteLock
-	err := row.Scan(&i.Recipient, &i.MessageType, &i.CurrentMessageID)
-	return i, err
-}
-
 const getProperties = `-- name: GetProperties :many
 SELECT owner, application, key, value, created, updated
 FROM property
@@ -684,8 +645,8 @@ INSERT INTO eventlog (
       $7,
       $8,
       $9,
-      now(),
-      $10
+      $10,
+      $11
 )
 `
 
@@ -699,6 +660,7 @@ type InsertEventLogParams struct {
 	Key          string
 	Version      pgtype.Int8
 	UpdatedBy    string
+	Created      pgtype.Timestamptz
 	Payload      []byte
 }
 
@@ -713,6 +675,7 @@ func (q *Queries) InsertEventLog(ctx context.Context, arg InsertEventLogParams) 
 		arg.Key,
 		arg.Version,
 		arg.UpdatedBy,
+		arg.Created,
 		arg.Payload,
 	)
 	return err
@@ -1060,18 +1023,28 @@ func (q *Queries) ListMessagesAfterId(ctx context.Context, arg ListMessagesAfter
 	return items, nil
 }
 
-const nextSequenceValue = `-- name: NextSequenceValue :one
-UPDATE sequence_counter
-SET value = value + 1
-WHERE name = $1
-RETURNING value
+const nextMessageID = `-- name: NextMessageID :one
+INSERT INTO message_write_lock(
+      recipient, message_type, current_message_id
+) VALUES (
+      $1, $2, 1
+)
+ON CONFLICT(recipient, message_type)
+DO UPDATE SET
+  current_message_id = message_write_lock.current_message_id + 1
+RETURNING current_message_id
 `
 
-func (q *Queries) NextSequenceValue(ctx context.Context, name string) (int64, error) {
-	row := q.db.QueryRow(ctx, nextSequenceValue, name)
-	var value int64
-	err := row.Scan(&value)
-	return value, err
+type NextMessageIDParams struct {
+	Recipient   string
+	MessageType string
+}
+
+func (q *Queries) NextMessageID(ctx context.Context, arg NextMessageIDParams) (int64, error) {
+	row := q.db.QueryRow(ctx, nextMessageID, arg.Recipient, arg.MessageType)
+	var current_message_id int64
+	err := row.Scan(&current_message_id)
+	return current_message_id, err
 }
 
 const notify = `-- name: Notify :exec
@@ -1086,6 +1059,25 @@ type NotifyParams struct {
 func (q *Queries) Notify(ctx context.Context, arg NotifyParams) error {
 	_, err := q.db.Exec(ctx, notify, arg.Channel, arg.Message)
 	return err
+}
+
+const reserveSequenceValues = `-- name: ReserveSequenceValues :one
+UPDATE sequence_counter
+SET value = value + $1::bigint
+WHERE name = $2
+RETURNING value
+`
+
+type ReserveSequenceValuesParams struct {
+	Count int64
+	Name  string
+}
+
+func (q *Queries) ReserveSequenceValues(ctx context.Context, arg ReserveSequenceValuesParams) (int64, error) {
+	row := q.db.QueryRow(ctx, reserveSequenceValues, arg.Count, arg.Name)
+	var value int64
+	err := row.Scan(&value)
+	return value, err
 }
 
 const updateInboxMessage = `-- name: UpdateInboxMessage :exec
@@ -1103,24 +1095,6 @@ type UpdateInboxMessageParams struct {
 
 func (q *Queries) UpdateInboxMessage(ctx context.Context, arg UpdateInboxMessageParams) error {
 	_, err := q.db.Exec(ctx, updateInboxMessage, arg.IsRead, arg.Recipient, arg.ID)
-	return err
-}
-
-const updateMessageWriteLock = `-- name: UpdateMessageWriteLock :exec
-UPDATE message_write_lock
-SET current_message_id = $1
-WHERE recipient = $2
-      AND message_type = $3
-`
-
-type UpdateMessageWriteLockParams struct {
-	CurrentMessageID pgtype.Int8
-	Recipient        string
-	MessageType      string
-}
-
-func (q *Queries) UpdateMessageWriteLock(ctx context.Context, arg UpdateMessageWriteLockParams) error {
-	_, err := q.db.Exec(ctx, updateMessageWriteLock, arg.CurrentMessageID, arg.Recipient, arg.MessageType)
 	return err
 }
 

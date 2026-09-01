@@ -213,7 +213,7 @@ CREATE TABLE public.message (
 CREATE TABLE public.message_write_lock (
     recipient text NOT NULL,
     message_type text NOT NULL,
-    current_message_id bigint
+    current_message_id bigint DEFAULT 0 NOT NULL
 );
 
 

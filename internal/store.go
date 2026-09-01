@@ -1,11 +1,13 @@
 package internal
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
 	"strings"
 	"time"
 
@@ -396,39 +398,20 @@ func (s *PGStore) InsertMessage(
 	return nil
 }
 
-// nextMessageID allocates the next per-recipient message id. The lock row is
-// created on first use and then locked FOR UPDATE for the rest of the
+// nextMessageID allocates the next per-recipient message id. The upsert
+// creates the lock row on first use and row-locks it for the rest of the
 // transaction, which serializes writers per recipient and keeps ids gapless
-// and commit-ordered. The lock row is advanced to the returned id.
+// and commit-ordered.
 func nextMessageID(
 	ctx context.Context, q *postgres.Queries,
 	recipient string, messageType MessageType,
 ) (int64, error) {
-	err := q.EnsureMessageWriteLock(ctx, postgres.EnsureMessageWriteLockParams{
+	nextID, err := q.NextMessageID(ctx, postgres.NextMessageIDParams{
 		Recipient:   recipient,
 		MessageType: string(messageType),
 	})
 	if err != nil {
-		return 0, fmt.Errorf("ensure message lock: %w", err)
-	}
-
-	lock, err := q.GetMessageWriteLock(ctx, postgres.GetMessageWriteLockParams{
-		Recipient:   recipient,
-		MessageType: string(messageType),
-	})
-	if err != nil {
-		return 0, fmt.Errorf("get message lock: %w", err)
-	}
-
-	nextID := lock.CurrentMessageID.Int64 + 1
-
-	err = q.UpdateMessageWriteLock(ctx, postgres.UpdateMessageWriteLockParams{
-		Recipient:        recipient,
-		MessageType:      string(messageType),
-		CurrentMessageID: pg.BigintOrNull(nextID),
-	})
-	if err != nil {
-		return 0, fmt.Errorf("update message lock: %w", err)
+		return 0, fmt.Errorf("advance message lock: %w", err)
 	}
 
 	return nextID, nil
@@ -730,6 +713,17 @@ func (s *PGStore) SetProperties(
 		return fmt.Errorf("upsert user: %w", err)
 	}
 
+	// Lock property rows in a stable order so that concurrent writes with
+	// overlapping keys cannot deadlock on each other.
+	slices.SortFunc(updates, func(a, b PropertyUpdate) int {
+		return cmp.Or(
+			cmp.Compare(a.Application, b.Application),
+			cmp.Compare(a.Key, b.Key),
+		)
+	})
+
+	events := make([]postgres.InsertEventLogParams, 0, len(updates))
+
 	for _, prop := range updates {
 		err := q.UpsertProperty(ctx, postgres.UpsertPropertyParams{
 			Owner:       owner,
@@ -741,7 +735,7 @@ func (s *PGStore) SetProperties(
 			return fmt.Errorf("upsert property %s/%s: %w", prop.Application, prop.Key, err)
 		}
 
-		err = logAndNotify(ctx, q, postgres.InsertEventLogParams{
+		events = append(events, postgres.InsertEventLogParams{
 			Owner:        owner,
 			Type:         postgres.EventTypeUpdate,
 			ResourceKind: postgres.ResourceKindProperty,
@@ -750,9 +744,11 @@ func (s *PGStore) SetProperties(
 			Key:          prop.Key,
 			Payload:      nil,
 		})
-		if err != nil {
-			return fmt.Errorf("log and notify: %w", err)
-		}
+	}
+
+	err = logAndNotifyAll(ctx, q, events)
+	if err != nil {
+		return fmt.Errorf("log and notify: %w", err)
 	}
 
 	err = tx.Commit(ctx)
@@ -776,6 +772,17 @@ func (s *PGStore) DeleteProperties(
 
 	q := postgres.New(tx)
 
+	// Lock property rows in a stable order so that concurrent writes with
+	// overlapping keys cannot deadlock on each other.
+	slices.SortFunc(deletes, func(a, b PropertyDelete) int {
+		return cmp.Or(
+			cmp.Compare(a.Application, b.Application),
+			cmp.Compare(a.Key, b.Key),
+		)
+	})
+
+	events := make([]postgres.InsertEventLogParams, 0, len(deletes))
+
 	for _, prop := range deletes {
 		_, err := q.DeleteProperty(ctx, postgres.DeletePropertyParams{
 			Owner:       owner,
@@ -788,7 +795,7 @@ func (s *PGStore) DeleteProperties(
 			return fmt.Errorf("delete property %s/%s: %w", prop.Application, prop.Key, err)
 		}
 
-		err = logAndNotify(ctx, q, postgres.InsertEventLogParams{
+		events = append(events, postgres.InsertEventLogParams{
 			Owner:        owner,
 			Type:         postgres.EventTypeDelete,
 			ResourceKind: postgres.ResourceKindProperty,
@@ -797,9 +804,11 @@ func (s *PGStore) DeleteProperties(
 			Key:          prop.Key,
 			Payload:      nil,
 		})
-		if err != nil {
-			return fmt.Errorf("log and notify: %w", err)
-		}
+	}
+
+	err = logAndNotifyAll(ctx, q, events)
+	if err != nil {
+		return fmt.Errorf("log and notify: %w", err)
 	}
 
 	err = tx.Commit(ctx)
@@ -855,31 +864,57 @@ func (s *PGStore) GetEventLogEntriesAfterID(
 	return events, nil
 }
 
-// logAndNotify appends an eventlog entry and notifies listeners. The id is
-// taken from the eventlog sequence counter, which row-locks the counter for
-// the rest of the transaction so that ids are handed out in commit order.
+// logAndNotify appends a single eventlog entry, see logAndNotifyAll.
 func logAndNotify(
 	ctx context.Context, q *postgres.Queries,
 	params postgres.InsertEventLogParams,
 ) error {
-	id, err := q.NextSequenceValue(ctx, sequenceEventLog)
-	if err != nil {
-		return fmt.Errorf("next eventlog id: %w", err)
+	return logAndNotifyAll(ctx, q, []postgres.InsertEventLogParams{params})
+}
+
+// logAndNotifyAll appends eventlog entries and notifies listeners. Ids are
+// reserved from the eventlog sequence counter, which row-locks the counter
+// for the rest of the transaction so that ids are handed out in commit
+// order. Timestamps are assigned here, after the counter is taken, so that
+// created order matches id order.
+//
+// The counter is a lock shared by all eventlog writers, so it must be the
+// last lock the transaction acquires: callers must be done writing data
+// rows before calling, or two writers can deadlock on data row vs counter.
+func logAndNotifyAll(
+	ctx context.Context, q *postgres.Queries,
+	entries []postgres.InsertEventLogParams,
+) error {
+	if len(entries) == 0 {
+		return nil
 	}
 
-	params.ID = id
-
-	err = q.InsertEventLog(ctx, params)
-	if err != nil {
-		return fmt.Errorf("insert event log: %w", err)
-	}
-
-	err = notifyEventLogUpdated(ctx, q, EventLogEvent{
-		ID:    id,
-		Owner: params.Owner,
+	lastID, err := q.ReserveSequenceValues(ctx, postgres.ReserveSequenceValuesParams{
+		Name:  sequenceEventLog,
+		Count: int64(len(entries)),
 	})
 	if err != nil {
-		return fmt.Errorf("send notification: %w", err)
+		return fmt.Errorf("reserve eventlog ids: %w", err)
+	}
+
+	firstID := lastID - int64(len(entries)) + 1
+
+	for i, params := range entries {
+		params.ID = firstID + int64(i)
+		params.Created = pg.Time(time.Now())
+
+		err = q.InsertEventLog(ctx, params)
+		if err != nil {
+			return fmt.Errorf("insert event log: %w", err)
+		}
+
+		err = notifyEventLogUpdated(ctx, q, EventLogEvent{
+			ID:    params.ID,
+			Owner: params.Owner,
+		})
+		if err != nil {
+			return fmt.Errorf("send notification: %w", err)
+		}
 	}
 
 	return nil

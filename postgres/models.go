@@ -267,7 +267,7 @@ type Message struct {
 type MessageWriteLock struct {
 	Recipient        string
 	MessageType      string
-	CurrentMessageID pgtype.Int8
+	CurrentMessageID int64
 }
 
 type Property struct {
