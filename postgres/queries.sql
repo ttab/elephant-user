@@ -32,22 +32,22 @@ WHERE recipient = @recipient
 ORDER BY id ASC
 LIMIT sqlc.arg('limit')::bigint;
 
--- name: GetMessageWriteLock :one
-SELECT recipient, message_type, current_message_id
-FROM message_write_lock
-WHERE recipient = @recipient
-      AND message_type = @message_type
-FOR UPDATE;
-
--- name: UpsertMessageWriteLock :exec
+-- name: NextMessageID :one
 INSERT INTO message_write_lock(
       recipient, message_type, current_message_id
 ) VALUES (
-      @recipient, @message_type, @current_message_id
+      @recipient, @message_type, 1
 )
 ON CONFLICT(recipient, message_type)
 DO UPDATE SET
-  current_message_id = EXCLUDED.current_message_id;
+  current_message_id = message_write_lock.current_message_id + 1
+RETURNING current_message_id;
+
+-- name: ReserveSequenceValues :one
+UPDATE sequence_counter
+SET value = value + @count::bigint
+WHERE name = @name
+RETURNING value;
 
 -- name: InsertInboxMessage :exec
 INSERT INTO inbox_message(
@@ -179,11 +179,12 @@ SELECT COALESCE(MAX(id), 0)::bigint
 FROM eventlog
 WHERE owner = ANY(@owners::text[]);
 
--- name: InsertEventLog :one
+-- name: InsertEventLog :exec
 INSERT INTO eventlog (
-      owner, type, resource_kind, application, document_type,
+      id, owner, type, resource_kind, application, document_type,
       key, version, updated_by, created, payload
 ) VALUES (
+      @id,
       @owner,
       @type, -- type (update/delete)
       @resource_kind, -- resource_kind (document/property)
@@ -192,10 +193,9 @@ INSERT INTO eventlog (
       @key,
       @version,
       @updated_by,
-      now(),
+      @created,
       @payload
-)
-RETURNING id;
+);
 
 -- name: GetEventLogEntriesAfterId :many
 SELECT id, owner, type, resource_kind, application, document_type,

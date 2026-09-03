@@ -267,7 +267,7 @@ type Message struct {
 type MessageWriteLock struct {
 	Recipient        string
 	MessageType      string
-	CurrentMessageID pgtype.Int8
+	CurrentMessageID int64
 }
 
 type Property struct {
@@ -281,6 +281,11 @@ type Property struct {
 
 type SchemaVersion struct {
 	Version int32
+}
+
+type SequenceCounter struct {
+	Name  string
+	Value int64
 }
 
 type User struct {
