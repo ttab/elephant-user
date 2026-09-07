@@ -11,12 +11,12 @@ token is answered `unauthenticated` (HTTP 401) where it was answered
 `permission_denied` (403). `permission_denied` now only means an identified
 caller that lacks a scope. Anything keyed on 403 for a bad token, such as an
 ingress rule, a dashboard panel or a client's retry logic, reads 401 after the
-upgrade. Inherited from elephantine v0.29.0.
+upgrade. Inherited from elephantine v0.29.0. (#76)
 
 **Behaviour change (request bodies):** request bodies are capped at 8 MiB. A
 request that declares a larger `Content-Length` is refused with 413 before it
 reaches a handler; a chunked body fails on the read that passes the limit.
-Inherited from elephantine v0.28.0.
+Inherited from elephantine v0.28.0. (#76)
 
 **Behaviour change (delete events):** `DeleteDocument` on a document that does
 not exist no longer emits a delete event to the eventlog. An idempotent
@@ -25,15 +25,16 @@ should not rely on one. (#75)
 
 **Breaking (configuration):** the `PG_CONN_URI` environment variable is no
 longer read. Set the database connection string with `CONN_STRING` (or the
-`--db` flag), which the platform deployment templates already use.
+`--db` flag), which the platform deployment templates already use. (#76)
 
 **Build (Go 1.27.1):** the module's `go` directive is 1.27.1, which elephantine
 v0.29.0 requires. A build box pinned to an older toolchain with
 `GOTOOLCHAIN=local` fails on the upgrade; `GOTOOLCHAIN=auto` downloads it. The
-Docker build image moves to `golang:1.27.1-alpine3.24`.
+Docker build image moves to `golang:1.27.1-alpine3.24`. (#76)
 
 **Behaviour change (readiness):** `/health/ready` now fails when Postgres is
 unreachable. Previously the probe stayed green while every request failed.
+(#76)
 
 **Migrations:**
 
@@ -57,27 +58,28 @@ Changes:
   rows are now locked in a stable order and eventlog ids are reserved as the
   transaction's last lock. (#75)
 - New `--cleanup-interval` flag (`CLEANUP_INTERVAL`, default `12h`) controls how
-  often expired messages and inbox messages are removed.
+  often expired messages and inbox messages are removed. (#76)
 - `GET /version` reports the build version (set via `-ldflags "-X main.version"`,
   Dockerfile build arg `VERSION`) and the elephant-api/elephantine module versions.
+  (#76)
 - New metrics: `pgxpool_*` connection pool statistics (`pool="main"`, and
   `pool="pubsub"` when a bouncer pool is configured), `pg_job_lock_*` for the
   cleaner's job lock, `task_restarts_total{task="pubsub"}` for LISTEN
   subscriber restarts, and
   `rpc_protocol_responses_total{service,method,protocol,code,client_id}` from
   elephantine, which breaks RPC responses down by error code and calling
-  application.
+  application. (#76)
 - The plaintext listener serves HTTP/2 alongside HTTP/1.1; HTTP/1.1 callers are
-  unaffected.
+  unaffected. (#76)
 - The pg LISTEN subscriber and the retention cleaner run as supervised tasks
   next to the API server. A subscriber that loses its connection for a reason
   the library does not reconnect from is restarted with a 5 s backoff; a
   cleaner failure stops the service so it is restarted rather than running
   without retention. On SIGTERM both stop immediately while the server keeps
   serving in-flight requests for up to 10 s. The cleaner sweeps once as soon as
-  it acquires its lock, then every interval.
+  it acquires its lock, then every interval. (#76)
 - Dependency upgrades: elephantine to v0.29.1, ttab/mage to v0.13.1,
-  golangci-lint to 2.13, `golang.org/x/crypto` to v0.56.0.
+  golangci-lint to 2.13, `golang.org/x/crypto` to v0.56.0. (#76)
 
 ## [v1.3.0] - 2026-07-20
 
