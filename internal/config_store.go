@@ -68,81 +68,75 @@ func (s *PGStore) RegisterConfigGeneration(
 func (s *PGStore) registerConfigGeneration(
 	ctx context.Context, description string,
 	schemas []ConfigSchema, activate bool, hash string,
-) (_ int64, outErr error) {
-	tx, err := s.dbpool.Begin(ctx)
-	if err != nil {
-		return 0, fmt.Errorf("begin transaction: %w", err)
-	}
+) (int64, error) {
+	var genID int64
 
-	defer pg.Rollback(tx, &outErr)
+	err := pg.WithTX(ctx, s.dbpool, func(tx pgx.Tx) error {
+		q := postgres.New(tx)
 
-	q := postgres.New(tx)
-
-	err = ensureConfigSchemas(ctx, q, schemas)
-	if err != nil {
-		return 0, err
-	}
-
-	existing, err := q.GetConfigGenerationByIdentityHash(ctx, hash)
-	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
-		return 0, fmt.Errorf("get generation by identity hash: %w", err)
-	}
-
-	var (
-		genID  int64
-		active bool
-	)
-
-	if err == nil {
-		genID = existing.ID
-		active = existing.Active
-	} else {
-		row, err := q.InsertConfigGeneration(ctx,
-			postgres.InsertConfigGenerationParams{
-				IdentityHash: hash,
-				Description:  description,
-			})
+		err := ensureConfigSchemas(ctx, q, schemas)
 		if err != nil {
-			return 0, fmt.Errorf("insert generation: %w", err)
+			return err
 		}
 
-		for i, schema := range schemas {
-			err = q.InsertConfigGenerationSchema(ctx,
-				postgres.InsertConfigGenerationSchemaParams{
-					GenerationID: row.ID,
-					Name:         schema.Name,
-					Version:      schema.Version,
-					Ordinal:      int32(i),
+		existing, err := q.GetConfigGenerationByIdentityHash(ctx, hash)
+		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			return fmt.Errorf("get generation by identity hash: %w", err)
+		}
+
+		var active bool
+
+		if err == nil {
+			genID = existing.ID
+			active = existing.Active
+		} else {
+			row, err := q.InsertConfigGeneration(ctx,
+				postgres.InsertConfigGenerationParams{
+					IdentityHash: hash,
+					Description:  description,
 				})
 			if err != nil {
-				return 0, fmt.Errorf(
-					"insert generation schema %q: %w",
-					schema.Name, err)
+				return fmt.Errorf("insert generation: %w", err)
+			}
+
+			for i, schema := range schemas {
+				err = q.InsertConfigGenerationSchema(ctx,
+					postgres.InsertConfigGenerationSchemaParams{
+						GenerationID: row.ID,
+						Name:         schema.Name,
+						Version:      schema.Version,
+						Ordinal:      int32(i),
+					})
+				if err != nil {
+					return fmt.Errorf(
+						"insert generation schema %q: %w",
+						schema.Name, err)
+				}
+			}
+
+			genID = row.ID
+			active = row.Active
+		}
+
+		// Only notify when the active generation changes: registering an
+		// inactive generation doesn't affect the active schema set that
+		// long-polls and the validator care about.
+		if activate && !active {
+			err = activateConfigGeneration(ctx, q, genID)
+			if err != nil {
+				return err
+			}
+
+			err = notifySchemasUpdated(ctx, q, SchemaEvent{Type: "activated"})
+			if err != nil {
+				return fmt.Errorf("send notification: %w", err)
 			}
 		}
 
-		genID = row.ID
-		active = row.Active
-	}
-
-	// Only notify when the active generation changes: registering an
-	// inactive generation doesn't affect the active schema set that
-	// long-polls and the validator care about.
-	if activate && !active {
-		err = activateConfigGeneration(ctx, q, genID)
-		if err != nil {
-			return 0, err
-		}
-
-		err = notifySchemasUpdated(ctx, q, SchemaEvent{Type: "activated"})
-		if err != nil {
-			return 0, fmt.Errorf("send notification: %w", err)
-		}
-	}
-
-	err = tx.Commit(ctx)
+		return nil
+	})
 	if err != nil {
-		return 0, fmt.Errorf("commit transaction: %w", err)
+		return 0, err
 	}
 
 	return genID, nil
@@ -222,41 +216,31 @@ func (s *PGStore) ActivateConfigGeneration(
 
 func (s *PGStore) activateGenerationTx(
 	ctx context.Context, id int64,
-) (outErr error) {
-	tx, err := s.dbpool.Begin(ctx)
-	if err != nil {
-		return fmt.Errorf("begin transaction: %w", err)
-	}
+) error {
+	return pg.WithTX(ctx, s.dbpool, func(tx pgx.Tx) error {
+		q := postgres.New(tx)
 
-	defer pg.Rollback(tx, &outErr)
-
-	q := postgres.New(tx)
-
-	gen, err := q.GetConfigGeneration(ctx, id)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return ErrGenerationNotFound
-	} else if err != nil {
-		return fmt.Errorf("get generation: %w", err)
-	}
-
-	if !gen.Active {
-		err = activateConfigGeneration(ctx, q, id)
-		if err != nil {
-			return err
+		gen, err := q.GetConfigGeneration(ctx, id)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrGenerationNotFound
+		} else if err != nil {
+			return fmt.Errorf("get generation: %w", err)
 		}
 
-		err = notifySchemasUpdated(ctx, q, SchemaEvent{Type: "activated"})
-		if err != nil {
-			return fmt.Errorf("send notification: %w", err)
+		if !gen.Active {
+			err := activateConfigGeneration(ctx, q, id)
+			if err != nil {
+				return err
+			}
+
+			err = notifySchemasUpdated(ctx, q, SchemaEvent{Type: "activated"})
+			if err != nil {
+				return fmt.Errorf("send notification: %w", err)
+			}
 		}
-	}
 
-	err = tx.Commit(ctx)
-	if err != nil {
-		return fmt.Errorf("commit transaction: %w", err)
-	}
-
-	return nil
+		return nil
+	})
 }
 
 func activateConfigGeneration(
@@ -492,37 +476,27 @@ func (s *PGStore) GetDeprecations(ctx context.Context) ([]Deprecation, error) {
 // UpdateDeprecation creates or updates a deprecation status.
 func (s *PGStore) UpdateDeprecation(
 	ctx context.Context, deprecation Deprecation,
-) (outErr error) {
-	tx, err := s.dbpool.Begin(ctx)
-	if err != nil {
-		return fmt.Errorf("begin transaction: %w", err)
-	}
+) error {
+	return pg.WithTX(ctx, s.dbpool, func(tx pgx.Tx) error {
+		q := postgres.New(tx)
 
-	defer pg.Rollback(tx, &outErr)
+		err := q.UpsertDeprecation(ctx, postgres.UpsertDeprecationParams{
+			Label:    deprecation.Label,
+			Enforced: deprecation.Enforced,
+		})
+		if err != nil {
+			return fmt.Errorf("upsert deprecation: %w", err)
+		}
 
-	q := postgres.New(tx)
+		err = pgNotify(ctx, q, NotifyChannelDeprecationUpdate, DeprecationEvent{
+			Label: deprecation.Label,
+		})
+		if err != nil {
+			return fmt.Errorf("send notification: %w", err)
+		}
 
-	err = q.UpsertDeprecation(ctx, postgres.UpsertDeprecationParams{
-		Label:    deprecation.Label,
-		Enforced: deprecation.Enforced,
+		return nil
 	})
-	if err != nil {
-		return fmt.Errorf("upsert deprecation: %w", err)
-	}
-
-	err = pgNotify(ctx, q, NotifyChannelDeprecationUpdate, DeprecationEvent{
-		Label: deprecation.Label,
-	})
-	if err != nil {
-		return fmt.Errorf("send notification: %w", err)
-	}
-
-	err = tx.Commit(ctx)
-	if err != nil {
-		return fmt.Errorf("commit transaction: %w", err)
-	}
-
-	return nil
 }
 
 // GetEnforcedDeprecations returns the labels of all enforced

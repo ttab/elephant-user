@@ -9,7 +9,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/prometheus/client_golang/prometheus"
 	"github.com/ttab/elephant-user/postgres"
 	"github.com/ttab/elephantine"
 	"github.com/ttab/newsdoc"
@@ -65,10 +64,8 @@ type Validator struct {
 	activeGenerationID   int64
 	enforcedDeprecations map[string]bool
 
-	logger *slog.Logger
-
-	deprecationsCounter         *prometheus.CounterVec
-	docsWithDeprecationsCounter *prometheus.CounterVec
+	logger  *slog.Logger
+	metrics *Metrics
 
 	cancel      func()
 	stopChannel chan struct{}
@@ -80,40 +77,16 @@ type Validator struct {
 // fallback).
 func NewValidator(
 	ctx context.Context, logger *slog.Logger, store ValidatorStore,
-	metricsRegisterer prometheus.Registerer,
+	metrics *Metrics,
 ) (*Validator, error) {
-	if metricsRegisterer == nil {
-		metricsRegisterer = prometheus.DefaultRegisterer
-	}
-
-	deprecationsCounter := prometheus.NewCounterVec(prometheus.CounterOpts{
-		Name: "elephant_user_deprecations_total",
-		Help: "Total number of deprecated value uses by label.",
-	}, []string{"label"})
-
-	docsWithDeprecationsCounter := prometheus.NewCounterVec(prometheus.CounterOpts{
-		Name: "elephant_user_docs_with_deprecations_total",
-		Help: "Total number of validated documents that use deprecated values.",
-	}, []string{"doc_type"})
-
-	for _, c := range []prometheus.Collector{
-		deprecationsCounter, docsWithDeprecationsCounter,
-	} {
-		err := metricsRegisterer.Register(c)
-		if err != nil {
-			return nil, fmt.Errorf("register metric: %w", err)
-		}
-	}
-
 	ctx, cancel := context.WithCancel(ctx)
 
 	v := Validator{
-		logger:                      logger,
-		deprecationsCounter:         deprecationsCounter,
-		docsWithDeprecationsCounter: docsWithDeprecationsCounter,
-		cancel:                      cancel,
-		stopChannel:                 make(chan struct{}),
-		refreshChan:                 make(chan chan struct{}),
+		logger:      logger,
+		metrics:     metrics,
+		cancel:      cancel,
+		stopChannel: make(chan struct{}),
+		refreshChan: make(chan chan struct{}),
 	}
 
 	err := v.loadSchemas(ctx, store)
@@ -216,8 +189,8 @@ func (v *Validator) deprecationHandler(
 			LogKeyDeprecationLabel, deprecation.Label,
 			LogKeyEntityRef, entityRef)
 
-		v.deprecationsCounter.WithLabelValues(deprecation.Label).Inc()
-		v.docsWithDeprecationsCounter.WithLabelValues(doc.Type).Inc()
+		v.metrics.Deprecations.WithLabelValues(deprecation.Label).Inc()
+		v.metrics.DocsWithDeprecations.WithLabelValues(doc.Type).Inc()
 	}
 
 	return revisor.DeprecationDecision{

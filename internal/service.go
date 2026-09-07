@@ -15,6 +15,7 @@ import (
 	"github.com/ttab/elephant-api/user"
 	"github.com/ttab/elephant-user/postgres"
 	"github.com/ttab/elephantine"
+	"github.com/ttab/elephantine/rpc"
 	"github.com/ttab/newsdoc"
 	"github.com/ttab/revisor"
 	"github.com/twitchtv/twirp"
@@ -279,7 +280,7 @@ func isAllowedOwner(auth *elephantine.AuthInfo, owner string) bool {
 func (s *Service) GetDocument(
 	ctx context.Context, req *user.GetDocumentRequest,
 ) (*user.GetDocumentResponse, error) {
-	auth, err := elephantine.RequireAnyScope(ctx, ScopeUser)
+	auth, err := rpc.RequireAnyScope(ctx, ScopeUser)
 	if err != nil {
 		return nil, err //nolint:wrapcheck
 	}
@@ -330,7 +331,7 @@ func (s *Service) GetDocument(
 func (s *Service) ListDocuments(
 	ctx context.Context, req *user.ListDocumentsRequest,
 ) (*user.ListDocumentsResponse, error) {
-	auth, err := elephantine.RequireAnyScope(ctx, ScopeUser)
+	auth, err := rpc.RequireAnyScope(ctx, ScopeUser)
 	if err != nil {
 		return nil, err //nolint:wrapcheck
 	}
@@ -382,7 +383,7 @@ func (s *Service) ListDocuments(
 func (s *Service) UpdateDocument(
 	ctx context.Context, req *user.UpdateDocumentRequest,
 ) (*user.UpdateDocumentResponse, error) {
-	auth, err := elephantine.RequireAnyScope(ctx, ScopeUser)
+	auth, err := rpc.RequireAnyScope(ctx, ScopeUser)
 	if err != nil {
 		return nil, err //nolint:wrapcheck
 	}
@@ -461,7 +462,7 @@ func (s *Service) UpdateDocument(
 func (s *Service) DeleteDocument(
 	ctx context.Context, req *user.DeleteDocumentRequest,
 ) (*user.DeleteDocumentResponse, error) {
-	auth, err := elephantine.RequireAnyScope(ctx, ScopeUser)
+	auth, err := rpc.RequireAnyScope(ctx, ScopeUser)
 	if err != nil {
 		return nil, err //nolint:wrapcheck
 	}
@@ -495,7 +496,7 @@ func (s *Service) DeleteDocument(
 func (s *Service) GetProperties(
 	ctx context.Context, req *user.GetPropertiesRequest,
 ) (*user.GetPropertiesResponse, error) {
-	auth, err := elephantine.RequireAnyScope(ctx, ScopeUser)
+	auth, err := rpc.RequireAnyScope(ctx, ScopeUser)
 	if err != nil {
 		return nil, err //nolint:wrapcheck
 	}
@@ -525,7 +526,7 @@ func (s *Service) GetProperties(
 func (s *Service) SetProperties(
 	ctx context.Context, req *user.SetPropertiesRequest,
 ) (*user.SetPropertiesResponse, error) {
-	auth, err := elephantine.RequireAnyScope(ctx, ScopeUser)
+	auth, err := rpc.RequireAnyScope(ctx, ScopeUser)
 	if err != nil {
 		return nil, err //nolint:wrapcheck
 	}
@@ -551,7 +552,7 @@ func (s *Service) SetProperties(
 func (s *Service) DeleteProperties(
 	ctx context.Context, req *user.DeletePropertiesRequest,
 ) (*user.DeletePropertiesResponse, error) {
-	auth, err := elephantine.RequireAnyScope(ctx, ScopeUser)
+	auth, err := rpc.RequireAnyScope(ctx, ScopeUser)
 	if err != nil {
 		return nil, err //nolint:wrapcheck
 	}
@@ -576,7 +577,7 @@ func (s *Service) DeleteProperties(
 func (s *Service) PollEventLog(
 	ctx context.Context, req *user.PollEventLogRequest,
 ) (*user.PollEventLogResponse, error) {
-	auth, err := elephantine.RequireAnyScope(ctx, ScopeUser)
+	auth, err := rpc.RequireAnyScope(ctx, ScopeUser)
 	if err != nil {
 		return nil, err //nolint:wrapcheck
 	}
@@ -669,7 +670,7 @@ func (s *Service) PollEventLog(
 func (s *Service) DeleteInboxMessage(
 	ctx context.Context, req *user.DeleteInboxMessageRequest,
 ) (*user.DeleteInboxMessageResponse, error) {
-	auth, err := elephantine.RequireAnyScope(ctx, ScopeUser)
+	auth, err := rpc.RequireAnyScope(ctx, ScopeUser)
 	if err != nil {
 		return nil, err //nolint:wrapcheck
 	}
@@ -693,7 +694,7 @@ func (s *Service) DeleteInboxMessage(
 func (s *Service) ListInboxMessages(
 	ctx context.Context, req *user.ListInboxMessagesRequest,
 ) (*user.ListInboxMessagesResponse, error) {
-	auth, err := elephantine.RequireAnyScope(ctx, ScopeUser)
+	auth, err := rpc.RequireAnyScope(ctx, ScopeUser)
 	if err != nil {
 		return nil, err //nolint:wrapcheck
 	}
@@ -742,7 +743,7 @@ func (s *Service) ListInboxMessages(
 func (s *Service) PollInboxMessages(
 	ctx context.Context, req *user.PollInboxMessagesRequest,
 ) (*user.PollInboxMessagesResponse, error) {
-	auth, err := elephantine.RequireAnyScope(ctx, ScopeUser)
+	auth, err := rpc.RequireAnyScope(ctx, ScopeUser)
 	if err != nil {
 		return nil, err //nolint:wrapcheck
 	}
@@ -838,7 +839,7 @@ func (s *Service) PollInboxMessages(
 func (s *Service) PollMessages(
 	ctx context.Context, req *user.PollMessagesRequest,
 ) (*user.PollMessagesResponse, error) {
-	auth, err := elephantine.RequireAnyScope(ctx, ScopeUser)
+	auth, err := rpc.RequireAnyScope(ctx, ScopeUser)
 	if err != nil {
 		return nil, err //nolint:wrapcheck
 	}
@@ -935,7 +936,7 @@ func (s *Service) PollMessages(
 func (s *Service) PushInboxMessage(
 	ctx context.Context, req *user.PushInboxMessageRequest,
 ) (*user.PushInboxMessageResponse, error) {
-	auth, err := elephantine.RequireAnyScope(ctx, ScopeUser)
+	auth, err := rpc.RequireAnyScope(ctx, ScopeUser)
 	if err != nil {
 		return nil, err //nolint:wrapcheck
 	}
@@ -994,7 +995,7 @@ func (s *Service) PushInboxMessage(
 func (s *Service) PushMessage(
 	ctx context.Context, req *user.PushMessageRequest,
 ) (*user.PushMessageResponse, error) {
-	auth, err := elephantine.RequireAnyScope(ctx, ScopeUser)
+	auth, err := rpc.RequireAnyScope(ctx, ScopeUser)
 	if err != nil {
 		return nil, err //nolint:wrapcheck
 	}
@@ -1040,7 +1041,7 @@ func (s *Service) PushMessage(
 func (s *Service) UpdateInboxMessage(
 	ctx context.Context, req *user.UpdateInboxMessageRequest,
 ) (*user.UpdateInboxMessageResponse, error) {
-	auth, err := elephantine.RequireAnyScope(ctx, ScopeUser)
+	auth, err := rpc.RequireAnyScope(ctx, ScopeUser)
 	if err != nil {
 		return nil, err //nolint:wrapcheck
 	}

@@ -17,8 +17,11 @@ import (
 	"github.com/ttab/elephant-user/postgres"
 	"github.com/ttab/elephant-user/schema"
 	"github.com/ttab/elephantine"
+	"github.com/ttab/elephantine/pg"
 	"github.com/urfave/cli/v3"
 )
+
+var version string // set via -ldflags at build time
 
 func main() {
 	err := godotenv.Load()
@@ -64,7 +67,7 @@ func main() {
 			&cli.StringFlag{ //nolint:gosec // G101: Default dev connection string, not real credentials.
 				Name:    "db",
 				Value:   "postgres://elephant-user:pass@localhost/elephant-user",
-				Sources: cli.EnvVars("PG_CONN_URI", "CONN_STRING"),
+				Sources: cli.EnvVars("CONN_STRING"),
 			},
 			&cli.StringFlag{
 				Name:    "db-bouncer",
@@ -74,6 +77,13 @@ func main() {
 				Name:    "cors-host",
 				Usage:   "CORS hosts to allow, supports wildcards",
 				Sources: cli.EnvVars("CORS_HOSTS"),
+			},
+			&cli.DurationFlag{
+				Name: "cleanup-interval",
+				Usage: `How often expired messages and inbox messages are
+removed. Runs on one replica at a time under a job lock.`,
+				Sources: cli.EnvVars("CLEANUP_INTERVAL"),
+				Value:   12 * time.Hour,
 			},
 			&cli.BoolFlag{
 				Name: "migrate-db",
@@ -114,7 +124,12 @@ func runUser(ctx context.Context, cmd *cli.Command) error {
 		bouncerConnString = cmd.String("db-bouncer")
 		corsHosts         = cmd.StringSlice("cors-host")
 		migrateDB         = cmd.Bool("migrate-db")
+		cleanupInterval   = cmd.Duration("cleanup-interval")
 	)
+
+	if cleanupInterval <= 0 {
+		return fmt.Errorf("cleanup-interval must be positive, got %s", cleanupInterval)
+	}
 
 	logger := elephantine.SetUpLogger(logLevel, os.Stdout)
 
@@ -162,6 +177,21 @@ func runUser(ctx context.Context, cmd *cli.Command) error {
 		}
 	}
 
+	// Pool metrics are registered where the pools are created; the
+	// pubsub pool doubles as the main pool when no bouncer is configured.
+	poolCollectors := map[string]*pgxpool.Pool{"main": dbpool}
+	if dbpool != pubsubPool {
+		poolCollectors["pubsub"] = pubsubPool
+	}
+
+	for name, pool := range poolCollectors {
+		err = prometheus.DefaultRegisterer.Register(
+			pg.NewPoolStatCollector(pool, name))
+		if err != nil {
+			return fmt.Errorf("register %s pool metrics: %w", name, err)
+		}
+	}
+
 	if migrateDB {
 		logger.Info("migrating database schema")
 
@@ -178,20 +208,26 @@ func runUser(ctx context.Context, cmd *cli.Command) error {
 		return fmt.Errorf("set up authentication: %w", err)
 	}
 
+	metrics, err := internal.NewMetrics(prometheus.DefaultRegisterer)
+	if err != nil {
+		return fmt.Errorf("set up metrics: %w", err)
+	}
+
 	store := internal.NewPGStore(logger, dbpool)
 
-	go store.RunSubscriber(ctx, pubsubPool)
-
-	go store.RunCleaner(ctx, 12*time.Hour)
-
-	validator, err := internal.NewValidator(
-		ctx, logger, store, prometheus.DefaultRegisterer)
+	validator, err := internal.NewValidator(ctx, logger, store, metrics)
 	if err != nil {
 		return fmt.Errorf("create validator: %w", err)
 	}
 
+	// LISTEN on the direct pool: session-level LISTEN is incompatible
+	// with transaction pooling. Notifications missed while the connection
+	// is down are caught up by the validator's periodic recheck.
+	subscriber := store.NewSubscriber(pubsubPool)
+
 	serverOpts := []elephantine.APIServerOption{
 		elephantine.APIServerCORSHosts(corsHosts...),
+		elephantine.APIServerVersion(version),
 	}
 
 	if certFile != "" {
@@ -200,6 +236,8 @@ func runUser(ctx context.Context, cmd *cli.Command) error {
 	}
 
 	server := elephantine.NewAPIServer(logger, addr, profileAddr, serverOpts...)
+
+	server.Health.AddReadyFunction("postgres", dbpool.Ping)
 
 	// Report schema state as part of readiness without failing the
 	// probe: a freshly deployed service must be able to accept config
@@ -219,6 +257,9 @@ func runUser(ctx context.Context, cmd *cli.Command) error {
 		Registerer:           prometheus.DefaultRegisterer,
 		Service:              service,
 		ConfigurationService: configurationService,
+		Subscriber:           subscriber,
+		Store:                store,
+		CleanupInterval:      cleanupInterval,
 	})
 	if err != nil {
 		return fmt.Errorf("run application: %w", err)

@@ -11,7 +11,7 @@ import (
 
 	"github.com/ttab/elephant-api/user"
 	"github.com/ttab/elephant-user/postgres"
-	"github.com/ttab/elephantine"
+	"github.com/ttab/elephantine/rpc"
 	"github.com/ttab/revisor"
 	"github.com/twitchtv/twirp"
 )
@@ -66,7 +66,7 @@ func NewConfigurationService(
 func (s *ConfigurationService) RegisterConfigGeneration(
 	ctx context.Context, req *user.RegisterConfigGenerationRequest,
 ) (*user.RegisterConfigGenerationResponse, error) {
-	_, err := elephantine.RequireAnyScope(ctx, ScopeSchemaAdmin)
+	_, err := rpc.RequireAnyScope(ctx, ScopeSchemaAdmin)
 	if err != nil {
 		return nil, err //nolint:wrapcheck
 	}
@@ -192,7 +192,7 @@ func (s *ConfigurationService) resolveConstraintSet(
 func (s *ConfigurationService) ActivateConfigGeneration(
 	ctx context.Context, req *user.ActivateConfigGenerationRequest,
 ) (*user.ActivateConfigGenerationResponse, error) {
-	_, err := elephantine.RequireAnyScope(ctx, ScopeSchemaAdmin)
+	_, err := rpc.RequireAnyScope(ctx, ScopeSchemaAdmin)
 	if err != nil {
 		return nil, err //nolint:wrapcheck
 	}
@@ -217,7 +217,7 @@ func (s *ConfigurationService) ActivateConfigGeneration(
 func (s *ConfigurationService) GetActiveConfigGeneration(
 	ctx context.Context, req *user.GetActiveConfigGenerationRequest,
 ) (*user.GetActiveConfigGenerationResponse, error) {
-	_, err := elephantine.RequireAnyScope(ctx,
+	_, err := rpc.RequireAnyScope(ctx,
 		ScopeSchemaAdmin, ScopeSchemaRead)
 	if err != nil {
 		return nil, err //nolint:wrapcheck
@@ -288,7 +288,7 @@ func (s *ConfigurationService) waitForGenerationChange(
 func (s *ConfigurationService) ListConfigGenerations(
 	ctx context.Context, req *user.ListConfigGenerationsRequest,
 ) (*user.ListConfigGenerationsResponse, error) {
-	_, err := elephantine.RequireAnyScope(ctx,
+	_, err := rpc.RequireAnyScope(ctx,
 		ScopeSchemaAdmin, ScopeSchemaRead)
 	if err != nil {
 		return nil, err //nolint:wrapcheck
@@ -324,7 +324,7 @@ func (s *ConfigurationService) ListConfigGenerations(
 func (s *ConfigurationService) GetSchema(
 	ctx context.Context, req *user.GetSchemaRequest,
 ) (*user.GetSchemaResponse, error) {
-	_, err := elephantine.RequireAnyScope(ctx,
+	_, err := rpc.RequireAnyScope(ctx,
 		ScopeSchemaAdmin, ScopeSchemaRead)
 	if err != nil {
 		return nil, err //nolint:wrapcheck
@@ -352,7 +352,7 @@ func (s *ConfigurationService) GetSchema(
 func (s *ConfigurationService) GetDeprecations(
 	ctx context.Context, _ *user.GetDeprecationsRequest,
 ) (*user.GetDeprecationsResponse, error) {
-	_, err := elephantine.RequireAnyScope(ctx,
+	_, err := rpc.RequireAnyScope(ctx,
 		ScopeSchemaAdmin, ScopeSchemaRead)
 	if err != nil {
 		return nil, err //nolint:wrapcheck
@@ -381,7 +381,7 @@ func (s *ConfigurationService) GetDeprecations(
 func (s *ConfigurationService) UpdateDeprecation(
 	ctx context.Context, req *user.UpdateDeprecationRequest,
 ) (*user.UpdateDeprecationResponse, error) {
-	_, err := elephantine.RequireAnyScope(ctx, ScopeSchemaAdmin)
+	_, err := rpc.RequireAnyScope(ctx, ScopeSchemaAdmin)
 	if err != nil {
 		return nil, err //nolint:wrapcheck
 	}

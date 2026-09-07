@@ -13,10 +13,12 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/ttab/elephant-api/newsdoc"
 	"github.com/ttab/elephant-user/postgres"
 	"github.com/ttab/elephantine"
 	"github.com/ttab/elephantine/pg"
+	"github.com/ttab/elephantine/pg/joblock"
 )
 
 var ErrDocNotFound = errors.New("document not found")
@@ -65,20 +67,20 @@ func NewPGStore(
 	}
 }
 
-// RunSubscriber starts a PostgreSQL LISTEN subscriber for all store
-// notification channels. Blocks until the context is cancelled.
-func (s *PGStore) RunSubscriber(ctx context.Context, pool *pgxpool.Pool) {
-	err := pg.NewSubscriber(s.logger, pool, []pg.ChannelSubscription{
+// NewSubscriber creates the PostgreSQL LISTEN subscriber that feeds all
+// store notification channels. The pool must be a direct connection
+// (LISTEN is incompatible with transaction pooling). Run it with
+// Subscriber.Run; it blocks until the context is cancelled.
+func (s *PGStore) NewSubscriber(
+	pool *pgxpool.Pool, opts ...pg.SubscriberOption,
+) *pg.Subscriber {
+	return pg.NewSubscriber(s.logger, pool, []pg.ChannelSubscription{
 		s.Messages,
 		s.InboxMessages,
 		s.EventLog,
 		s.Schemas,
 		s.Deprecations,
-	}).Run(ctx)
-	if err != nil && !errors.Is(err, context.Canceled) {
-		s.logger.ErrorContext(ctx, "pg notification subscriber stopped",
-			elephantine.LogKeyError, err)
-	}
+	}, opts...)
 }
 
 // OnMessageUpdate notifies the channel ch of message updates for a recipient.
@@ -274,128 +276,104 @@ func (s *PGStore) ListMessagesAfterID(
 // InsertInboxMessage implements Store.
 func (s *PGStore) InsertInboxMessage(
 	ctx context.Context, message InboxMessage,
-) (outErr error) {
+) error {
 	payload, err := json.Marshal(message.Payload)
 	if err != nil {
 		return fmt.Errorf("marshal message payload: %w", err)
 	}
 
-	tx, err := s.dbpool.Begin(ctx)
-	if err != nil {
-		return fmt.Errorf("begin transaction: %w", err)
-	}
+	return pg.WithTX(ctx, s.dbpool, func(tx pgx.Tx) error {
+		q := postgres.New(tx)
 
-	// We defer a rollback, rollback after commit won't be treated as an
-	// error.
-	defer pg.Rollback(tx, &outErr)
+		err := q.UpsertUser(ctx, postgres.UpsertUserParams{
+			Sub:     message.Recipient,
+			Created: pg.Time(message.Created),
+			Kind:    postgres.UserKindUser,
+		})
+		if err != nil {
+			return fmt.Errorf("upsert user: %w", err)
+		}
 
-	q := postgres.New(tx)
+		nextID, err := nextMessageID(ctx, q, message.Recipient, MessageTypeInbox)
+		if err != nil {
+			return err
+		}
 
-	err = q.UpsertUser(ctx, postgres.UpsertUserParams{
-		Sub:     message.Recipient,
-		Created: pg.Time(message.Created),
-		Kind:    postgres.UserKindUser,
+		err = q.InsertInboxMessage(ctx, postgres.InsertInboxMessageParams{
+			Recipient: message.Recipient,
+			ID:        nextID,
+			Created:   pg.Time(message.Created),
+			CreatedBy: message.CreatedBy,
+			Updated:   pg.Time(message.Updated),
+			IsRead:    message.IsRead,
+			Payload:   payload,
+		})
+		if err != nil {
+			return fmt.Errorf("insert inbox message: %w", err)
+		}
+
+		err = notifyInboxMessageUpdated(ctx, q, MessageEvent{
+			ID:        nextID,
+			Recipient: message.Recipient,
+		})
+		if err != nil {
+			return fmt.Errorf("send notification: %w", err)
+		}
+
+		return nil
 	})
-	if err != nil {
-		return fmt.Errorf("upsert user: %w", err)
-	}
-
-	nextID, err := nextMessageID(ctx, q, message.Recipient, MessageTypeInbox)
-	if err != nil {
-		return err
-	}
-
-	err = q.InsertInboxMessage(ctx, postgres.InsertInboxMessageParams{
-		Recipient: message.Recipient,
-		ID:        nextID,
-		Created:   pg.Time(message.Created),
-		CreatedBy: message.CreatedBy,
-		Updated:   pg.Time(message.Updated),
-		IsRead:    message.IsRead,
-		Payload:   payload,
-	})
-	if err != nil {
-		return fmt.Errorf("insert inbox message: %w", err)
-	}
-
-	err = notifyInboxMessageUpdated(ctx, q, MessageEvent{
-		ID:        nextID,
-		Recipient: message.Recipient,
-	})
-	if err != nil {
-		return fmt.Errorf("send notification: %w", err)
-	}
-
-	err = tx.Commit(ctx)
-	if err != nil {
-		return fmt.Errorf("commit transaction: %w", err)
-	}
-
-	return nil
 }
 
 // InsertMessage implements Store.
 func (s *PGStore) InsertMessage(
 	ctx context.Context, message Message,
-) (outErr error) {
+) error {
 	payload, err := json.Marshal(message.Payload)
 	if err != nil {
 		return fmt.Errorf("marshal message payload: %w", err)
 	}
 
-	tx, err := s.dbpool.Begin(ctx)
-	if err != nil {
-		return fmt.Errorf("begin transaction: %w", err)
-	}
+	return pg.WithTX(ctx, s.dbpool, func(tx pgx.Tx) error {
+		q := postgres.New(tx)
 
-	// We defer a rollback, rollback after commit won't be treated as an
-	// error.
-	defer pg.Rollback(tx, &outErr)
+		err := q.UpsertUser(ctx, postgres.UpsertUserParams{
+			Sub:     message.Recipient,
+			Created: pg.Time(message.Created),
+			Kind:    postgres.UserKindUser,
+		})
+		if err != nil {
+			return fmt.Errorf("upsert user: %w", err)
+		}
 
-	q := postgres.New(tx)
+		nextID, err := nextMessageID(ctx, q, message.Recipient, MessageTypeSystem)
+		if err != nil {
+			return err
+		}
 
-	err = q.UpsertUser(ctx, postgres.UpsertUserParams{
-		Sub:     message.Recipient,
-		Created: pg.Time(message.Created),
-		Kind:    postgres.UserKindUser,
+		err = q.InsertMessage(ctx, postgres.InsertMessageParams{
+			Recipient: message.Recipient,
+			ID:        nextID,
+			Type:      pg.TextOrNull(message.Type),
+			Created:   pg.Time(message.Created),
+			CreatedBy: message.CreatedBy,
+			DocUuid:   pg.PUUID(message.DocUUID),
+			DocType:   pg.TextOrNull(message.DocType),
+			Payload:   payload,
+		})
+		if err != nil {
+			return fmt.Errorf("insert message: %w", err)
+		}
+
+		err = notifyMessageUpdated(ctx, q, MessageEvent{
+			ID:        nextID,
+			Recipient: message.Recipient,
+		})
+		if err != nil {
+			return fmt.Errorf("send notification: %w", err)
+		}
+
+		return nil
 	})
-	if err != nil {
-		return fmt.Errorf("upsert user: %w", err)
-	}
-
-	nextID, err := nextMessageID(ctx, q, message.Recipient, MessageTypeSystem)
-	if err != nil {
-		return err
-	}
-
-	err = q.InsertMessage(ctx, postgres.InsertMessageParams{
-		Recipient: message.Recipient,
-		ID:        nextID,
-		Type:      pg.TextOrNull(message.Type),
-		Created:   pg.Time(message.Created),
-		CreatedBy: message.CreatedBy,
-		DocUuid:   pg.PUUID(message.DocUUID),
-		DocType:   pg.TextOrNull(message.DocType),
-		Payload:   payload,
-	})
-	if err != nil {
-		return fmt.Errorf("insert message: %w", err)
-	}
-
-	err = notifyMessageUpdated(ctx, q, MessageEvent{
-		ID:        nextID,
-		Recipient: message.Recipient,
-	})
-	if err != nil {
-		return fmt.Errorf("send notification: %w", err)
-	}
-
-	err = tx.Commit(ctx)
-	if err != nil {
-		return fmt.Errorf("commit transaction: %w", err)
-	}
-
-	return nil
 }
 
 // nextMessageID allocates the next per-recipient message id. The upsert
@@ -558,108 +536,88 @@ func (s *PGStore) ListDocuments(
 
 func (s *PGStore) UpdateDocument(
 	ctx context.Context, update DocumentUpdate,
-) (outErr error) {
-	tx, err := s.dbpool.Begin(ctx)
-	if err != nil {
-		return fmt.Errorf("begin transaction: %w", err)
-	}
+) error {
+	return pg.WithTX(ctx, s.dbpool, func(tx pgx.Tx) error {
+		q := postgres.New(tx)
 
-	defer pg.Rollback(tx, &outErr)
+		err := q.UpsertUser(ctx, postgres.UpsertUserParams{
+			Sub:     update.Owner,
+			Created: pg.Time(time.Now()),
+			Kind:    ownerToUserKind(update.Owner),
+		})
+		if err != nil {
+			return fmt.Errorf("upsert user: %w", err)
+		}
 
-	q := postgres.New(tx)
+		version, err := q.UpsertDocument(ctx, postgres.UpsertDocumentParams{
+			Owner:         update.Owner,
+			Application:   update.Application,
+			Type:          update.Type,
+			Key:           update.Key,
+			SchemaVersion: update.SchemaVersion,
+			Title:         update.Title,
+			Payload:       update.Payload,
+			UpdatedBy:     update.UpdatedBy,
+		})
+		if err != nil {
+			return fmt.Errorf("upsert document: %w", err)
+		}
 
-	err = q.UpsertUser(ctx, postgres.UpsertUserParams{
-		Sub:     update.Owner,
-		Created: pg.Time(time.Now()),
-		Kind:    ownerToUserKind(update.Owner),
+		err = logAndNotify(ctx, q, postgres.InsertEventLogParams{
+			Owner:        update.Owner,
+			Type:         postgres.EventTypeUpdate,
+			ResourceKind: postgres.ResourceKindDocument,
+			Application:  update.Application,
+			DocumentType: pg.Text(update.Type),
+			Key:          update.Key,
+			Version:      pg.Int64(version),
+			UpdatedBy:    update.UpdatedBy,
+			Payload:      nil,
+		})
+		if err != nil {
+			return fmt.Errorf("log and notify: %w", err)
+		}
+
+		return nil
 	})
-	if err != nil {
-		return fmt.Errorf("upsert user: %w", err)
-	}
-
-	version, err := q.UpsertDocument(ctx, postgres.UpsertDocumentParams{
-		Owner:         update.Owner,
-		Application:   update.Application,
-		Type:          update.Type,
-		Key:           update.Key,
-		SchemaVersion: update.SchemaVersion,
-		Title:         update.Title,
-		Payload:       update.Payload,
-		UpdatedBy:     update.UpdatedBy,
-	})
-	if err != nil {
-		return fmt.Errorf("upsert document: %w", err)
-	}
-
-	err = logAndNotify(ctx, q, postgres.InsertEventLogParams{
-		Owner:        update.Owner,
-		Type:         postgres.EventTypeUpdate,
-		ResourceKind: postgres.ResourceKindDocument,
-		Application:  update.Application,
-		DocumentType: pg.Text(update.Type),
-		Key:          update.Key,
-		Version:      pg.Int64(version),
-		UpdatedBy:    update.UpdatedBy,
-		Payload:      nil,
-	})
-	if err != nil {
-		return fmt.Errorf("log and notify: %w", err)
-	}
-
-	err = tx.Commit(ctx)
-	if err != nil {
-		return fmt.Errorf("commit transaction: %w", err)
-	}
-
-	return nil
 }
 
 func (s *PGStore) DeleteDocument(
 	ctx context.Context, owner string, application string,
 	docType string, key string,
-) (outErr error) {
-	tx, err := s.dbpool.Begin(ctx)
-	if err != nil {
-		return fmt.Errorf("begin transaction: %w", err)
-	}
+) error {
+	return pg.WithTX(ctx, s.dbpool, func(tx pgx.Tx) error {
+		q := postgres.New(tx)
 
-	defer pg.Rollback(tx, &outErr)
+		_, err := q.DeleteDocument(ctx, postgres.DeleteDocumentParams{
+			Owner:       owner,
+			Application: application,
+			Type:        docType,
+			Key:         key,
+		})
+		if errors.Is(err, pgx.ErrNoRows) {
+			// Nothing was deleted, so there is no change to log.
+			return nil
+		} else if err != nil {
+			return fmt.Errorf("delete document: %w", err)
+		}
 
-	q := postgres.New(tx)
+		err = logAndNotify(ctx, q, postgres.InsertEventLogParams{
+			Owner:        owner,
+			Type:         postgres.EventTypeDelete,
+			ResourceKind: postgres.ResourceKindDocument,
+			Application:  application,
+			DocumentType: pg.Text(docType),
+			Key:          key,
+			UpdatedBy:    owner,
+			Payload:      nil,
+		})
+		if err != nil {
+			return fmt.Errorf("log and notify: %w", err)
+		}
 
-	_, err = q.DeleteDocument(ctx, postgres.DeleteDocumentParams{
-		Owner:       owner,
-		Application: application,
-		Type:        docType,
-		Key:         key,
-	})
-	if errors.Is(err, pgx.ErrNoRows) {
-		// Nothing was deleted, so there is no change to log.
 		return nil
-	} else if err != nil {
-		return fmt.Errorf("delete document: %w", err)
-	}
-
-	err = logAndNotify(ctx, q, postgres.InsertEventLogParams{
-		Owner:        owner,
-		Type:         postgres.EventTypeDelete,
-		ResourceKind: postgres.ResourceKindDocument,
-		Application:  application,
-		DocumentType: pg.Text(docType),
-		Key:          key,
-		UpdatedBy:    owner,
-		Payload:      nil,
 	})
-	if err != nil {
-		return fmt.Errorf("log and notify: %w", err)
-	}
-
-	err = tx.Commit(ctx)
-	if err != nil {
-		return fmt.Errorf("commit transaction: %w", err)
-	}
-
-	return nil
 }
 
 func (s *PGStore) GetProperties(
@@ -694,129 +652,109 @@ func (s *PGStore) GetProperties(
 func (s *PGStore) SetProperties(
 	ctx context.Context, owner string,
 	updates []PropertyUpdate,
-) (outErr error) {
-	tx, err := s.dbpool.Begin(ctx)
-	if err != nil {
-		return fmt.Errorf("begin transaction: %w", err)
-	}
+) error {
+	return pg.WithTX(ctx, s.dbpool, func(tx pgx.Tx) error {
+		q := postgres.New(tx)
 
-	defer pg.Rollback(tx, &outErr)
-
-	q := postgres.New(tx)
-
-	err = q.UpsertUser(ctx, postgres.UpsertUserParams{
-		Sub:     owner,
-		Created: pg.Time(time.Now()),
-		Kind:    postgres.UserKindUser,
-	})
-	if err != nil {
-		return fmt.Errorf("upsert user: %w", err)
-	}
-
-	// Lock property rows in a stable order so that concurrent writes with
-	// overlapping keys cannot deadlock on each other.
-	slices.SortFunc(updates, func(a, b PropertyUpdate) int {
-		return cmp.Or(
-			cmp.Compare(a.Application, b.Application),
-			cmp.Compare(a.Key, b.Key),
-		)
-	})
-
-	events := make([]postgres.InsertEventLogParams, 0, len(updates))
-
-	for _, prop := range updates {
-		err := q.UpsertProperty(ctx, postgres.UpsertPropertyParams{
-			Owner:       owner,
-			Application: prop.Application,
-			Key:         prop.Key,
-			Value:       prop.Value,
+		err := q.UpsertUser(ctx, postgres.UpsertUserParams{
+			Sub:     owner,
+			Created: pg.Time(time.Now()),
+			Kind:    postgres.UserKindUser,
 		})
 		if err != nil {
-			return fmt.Errorf("upsert property %s/%s: %w", prop.Application, prop.Key, err)
+			return fmt.Errorf("upsert user: %w", err)
 		}
 
-		events = append(events, postgres.InsertEventLogParams{
-			Owner:        owner,
-			Type:         postgres.EventTypeUpdate,
-			ResourceKind: postgres.ResourceKindProperty,
-			Application:  prop.Application,
-			UpdatedBy:    owner,
-			Key:          prop.Key,
-			Payload:      nil,
+		// Lock property rows in a stable order so that concurrent writes with
+		// overlapping keys cannot deadlock on each other.
+		slices.SortFunc(updates, func(a, b PropertyUpdate) int {
+			return cmp.Or(
+				cmp.Compare(a.Application, b.Application),
+				cmp.Compare(a.Key, b.Key),
+			)
 		})
-	}
 
-	err = logAndNotifyAll(ctx, q, events)
-	if err != nil {
-		return fmt.Errorf("log and notify: %w", err)
-	}
+		events := make([]postgres.InsertEventLogParams, 0, len(updates))
 
-	err = tx.Commit(ctx)
-	if err != nil {
-		return fmt.Errorf("commit transaction: %w", err)
-	}
+		for _, prop := range updates {
+			err := q.UpsertProperty(ctx, postgres.UpsertPropertyParams{
+				Owner:       owner,
+				Application: prop.Application,
+				Key:         prop.Key,
+				Value:       prop.Value,
+			})
+			if err != nil {
+				return fmt.Errorf("upsert property %s/%s: %w", prop.Application, prop.Key, err)
+			}
 
-	return nil
+			events = append(events, postgres.InsertEventLogParams{
+				Owner:        owner,
+				Type:         postgres.EventTypeUpdate,
+				ResourceKind: postgres.ResourceKindProperty,
+				Application:  prop.Application,
+				UpdatedBy:    owner,
+				Key:          prop.Key,
+				Payload:      nil,
+			})
+		}
+
+		err = logAndNotifyAll(ctx, q, events)
+		if err != nil {
+			return fmt.Errorf("log and notify: %w", err)
+		}
+
+		return nil
+	})
 }
 
 func (s *PGStore) DeleteProperties(
 	ctx context.Context, owner string,
 	deletes []PropertyDelete,
-) (outErr error) {
-	tx, err := s.dbpool.Begin(ctx)
-	if err != nil {
-		return fmt.Errorf("begin transaction: %w", err)
-	}
+) error {
+	return pg.WithTX(ctx, s.dbpool, func(tx pgx.Tx) error {
+		q := postgres.New(tx)
 
-	defer pg.Rollback(tx, &outErr)
-
-	q := postgres.New(tx)
-
-	// Lock property rows in a stable order so that concurrent writes with
-	// overlapping keys cannot deadlock on each other.
-	slices.SortFunc(deletes, func(a, b PropertyDelete) int {
-		return cmp.Or(
-			cmp.Compare(a.Application, b.Application),
-			cmp.Compare(a.Key, b.Key),
-		)
-	})
-
-	events := make([]postgres.InsertEventLogParams, 0, len(deletes))
-
-	for _, prop := range deletes {
-		_, err := q.DeleteProperty(ctx, postgres.DeletePropertyParams{
-			Owner:       owner,
-			Application: prop.Application,
-			Key:         prop.Key,
+		// Lock property rows in a stable order so that concurrent writes with
+		// overlapping keys cannot deadlock on each other.
+		slices.SortFunc(deletes, func(a, b PropertyDelete) int {
+			return cmp.Or(
+				cmp.Compare(a.Application, b.Application),
+				cmp.Compare(a.Key, b.Key),
+			)
 		})
-		if errors.Is(err, pgx.ErrNoRows) {
-			continue
-		} else if err != nil {
-			return fmt.Errorf("delete property %s/%s: %w", prop.Application, prop.Key, err)
+
+		events := make([]postgres.InsertEventLogParams, 0, len(deletes))
+
+		for _, prop := range deletes {
+			_, err := q.DeleteProperty(ctx, postgres.DeletePropertyParams{
+				Owner:       owner,
+				Application: prop.Application,
+				Key:         prop.Key,
+			})
+			if errors.Is(err, pgx.ErrNoRows) {
+				continue
+			} else if err != nil {
+				return fmt.Errorf("delete property %s/%s: %w", prop.Application, prop.Key, err)
+			}
+
+			events = append(events, postgres.InsertEventLogParams{
+				Owner:        owner,
+				Type:         postgres.EventTypeDelete,
+				ResourceKind: postgres.ResourceKindProperty,
+				Application:  prop.Application,
+				UpdatedBy:    owner,
+				Key:          prop.Key,
+				Payload:      nil,
+			})
 		}
 
-		events = append(events, postgres.InsertEventLogParams{
-			Owner:        owner,
-			Type:         postgres.EventTypeDelete,
-			ResourceKind: postgres.ResourceKindProperty,
-			Application:  prop.Application,
-			UpdatedBy:    owner,
-			Key:          prop.Key,
-			Payload:      nil,
-		})
-	}
+		err := logAndNotifyAll(ctx, q, events)
+		if err != nil {
+			return fmt.Errorf("log and notify: %w", err)
+		}
 
-	err = logAndNotifyAll(ctx, q, events)
-	if err != nil {
-		return fmt.Errorf("log and notify: %w", err)
-	}
-
-	err = tx.Commit(ctx)
-	if err != nil {
-		return fmt.Errorf("commit transaction: %w", err)
-	}
-
-	return nil
+		return nil
+	})
 }
 
 func (s *PGStore) GetLatestEventLogID(
@@ -947,34 +885,58 @@ func pgNotify[T any](
 	return nil
 }
 
-func (s *PGStore) RunCleaner(ctx context.Context, period time.Duration) {
-	for {
-		select {
-		case <-time.After(period):
-		case <-ctx.Done():
-			return
-		}
+// RunCleaner removes expired messages on one instance at a time, supervised
+// by a job lock: once on acquiring the lock and then at the given interval.
+// Blocks until the context is cancelled.
+func (s *PGStore) RunCleaner(
+	ctx context.Context, interval time.Duration,
+	metricsRegisterer prometheus.Registerer,
+) error {
+	err := joblock.Run(ctx, s.dbpool, s.logger, "user", "cleaner",
+		joblock.Options{
+			PingInterval:      10 * time.Second,
+			StaleAfter:        1 * time.Minute,
+			CheckInterval:     20 * time.Second,
+			Timeout:           5 * time.Second,
+			MetricsRegisterer: metricsRegisterer,
+		},
+		func(ctx context.Context) error {
+			// Sweep as soon as the lock is held: a lock that changes
+			// hands more often than the interval would otherwise never
+			// reach a tick. Sweeps are idempotent deletes, so running
+			// one early costs nothing.
+			s.sweepOldMessages(ctx)
 
-		jobLock, err := pg.NewJobLock(s.dbpool, s.logger, "cleaner", pg.JobLockOptions{
-			PingInterval:  10 * time.Second,
-			StaleAfter:    1 * time.Minute,
-			CheckInterval: 20 * time.Second,
-			Timeout:       5 * time.Second,
+			ticker := time.NewTicker(interval)
+			defer ticker.Stop()
+
+			for {
+				select {
+				case <-ctx.Done():
+					// Lock loss or shutdown, not a failure: the
+					// job lock treats a returned error as a failed
+					// run and counts a restart.
+					return nil
+				case <-ticker.C:
+					s.sweepOldMessages(ctx)
+				}
+			}
 		})
-		if err != nil {
-			s.logger.ErrorContext(ctx, "failed to create job lock",
-				elephantine.LogKeyError, err)
+	if err != nil {
+		return fmt.Errorf("run cleaner job lock: %w", err)
+	}
 
-			continue
-		}
+	return nil
+}
 
-		err = jobLock.RunWithContext(ctx, s.removeOldMessages)
-		if err != nil {
-			s.logger.ErrorContext(
-				ctx, "lock cleaner error",
-				elephantine.LogKeyError, err,
-			)
-		}
+// sweepOldMessages runs one retention sweep. A failure is logged and left
+// for the next tick rather than surfaced: releasing the lock over a
+// transient error only hands the same failure to another replica.
+func (s *PGStore) sweepOldMessages(ctx context.Context) {
+	err := s.removeOldMessages(ctx)
+	if err != nil && ctx.Err() == nil {
+		s.logger.ErrorContext(ctx, "remove old messages",
+			elephantine.LogKeyError, err)
 	}
 }
 

@@ -39,6 +39,11 @@ linters:
     - wrapcheck
     - wsl_v5
   settings:
+    wrapcheck:
+      extra-ignore-sigs:
+        - elephantine.InvalidArgumentf(
+        - (context.Context).Err(
+        - github.com/ttab/elephantine/pg.WithTX(
     godox:
       keywords:
         - FIXME
