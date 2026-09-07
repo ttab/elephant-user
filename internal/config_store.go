@@ -39,7 +39,7 @@ func (s *PGStore) RegisterConfigGeneration(
 	// Retry on identity hash conflict, which can happen if another
 	// instance registers the same generation concurrently. The second
 	// attempt will find the existing generation by hash.
-	for attempt := 0; attempt < 2; attempt++ {
+	for range 2 {
 		id, err := s.registerConfigGeneration(
 			ctx, description, schemas, activate, hash)
 		if err != nil && pg.IsConstraintError(

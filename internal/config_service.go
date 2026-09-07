@@ -68,7 +68,7 @@ func (s *ConfigurationService) RegisterConfigGeneration(
 ) (*user.RegisterConfigGenerationResponse, error) {
 	_, err := rpc.RequireAnyScope(ctx, ScopeSchemaAdmin)
 	if err != nil {
-		return nil, err //nolint:wrapcheck
+		return nil, err
 	}
 
 	if len(req.Schemas) == 0 {
@@ -194,7 +194,7 @@ func (s *ConfigurationService) ActivateConfigGeneration(
 ) (*user.ActivateConfigGenerationResponse, error) {
 	_, err := rpc.RequireAnyScope(ctx, ScopeSchemaAdmin)
 	if err != nil {
-		return nil, err //nolint:wrapcheck
+		return nil, err
 	}
 
 	if req.Id < 1 {
@@ -220,7 +220,7 @@ func (s *ConfigurationService) GetActiveConfigGeneration(
 	_, err := rpc.RequireAnyScope(ctx,
 		ScopeSchemaAdmin, ScopeSchemaRead)
 	if err != nil {
-		return nil, err //nolint:wrapcheck
+		return nil, err
 	}
 
 	changed, err := s.waitForGenerationChange(
@@ -291,7 +291,7 @@ func (s *ConfigurationService) ListConfigGenerations(
 	_, err := rpc.RequireAnyScope(ctx,
 		ScopeSchemaAdmin, ScopeSchemaRead)
 	if err != nil {
-		return nil, err //nolint:wrapcheck
+		return nil, err
 	}
 
 	pageSize := req.PageSize
@@ -327,7 +327,7 @@ func (s *ConfigurationService) GetSchema(
 	_, err := rpc.RequireAnyScope(ctx,
 		ScopeSchemaAdmin, ScopeSchemaRead)
 	if err != nil {
-		return nil, err //nolint:wrapcheck
+		return nil, err
 	}
 
 	if req.Name == "" {
@@ -355,7 +355,7 @@ func (s *ConfigurationService) GetDeprecations(
 	_, err := rpc.RequireAnyScope(ctx,
 		ScopeSchemaAdmin, ScopeSchemaRead)
 	if err != nil {
-		return nil, err //nolint:wrapcheck
+		return nil, err
 	}
 
 	deprecations, err := s.store.GetDeprecations(ctx)
@@ -383,7 +383,7 @@ func (s *ConfigurationService) UpdateDeprecation(
 ) (*user.UpdateDeprecationResponse, error) {
 	_, err := rpc.RequireAnyScope(ctx, ScopeSchemaAdmin)
 	if err != nil {
-		return nil, err //nolint:wrapcheck
+		return nil, err
 	}
 
 	if req.Deprecation == nil {

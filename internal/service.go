@@ -282,7 +282,7 @@ func (s *Service) GetDocument(
 ) (*user.GetDocumentResponse, error) {
 	auth, err := rpc.RequireAnyScope(ctx, ScopeUser)
 	if err != nil {
-		return nil, err //nolint:wrapcheck
+		return nil, err
 	}
 
 	targetOwner := auth.Claims.Subject
@@ -333,7 +333,7 @@ func (s *Service) ListDocuments(
 ) (*user.ListDocumentsResponse, error) {
 	auth, err := rpc.RequireAnyScope(ctx, ScopeUser)
 	if err != nil {
-		return nil, err //nolint:wrapcheck
+		return nil, err
 	}
 
 	owners := getAllOwners(auth)
@@ -385,7 +385,7 @@ func (s *Service) UpdateDocument(
 ) (*user.UpdateDocumentResponse, error) {
 	auth, err := rpc.RequireAnyScope(ctx, ScopeUser)
 	if err != nil {
-		return nil, err //nolint:wrapcheck
+		return nil, err
 	}
 
 	targetOwner := auth.Claims.Subject
@@ -464,7 +464,7 @@ func (s *Service) DeleteDocument(
 ) (*user.DeleteDocumentResponse, error) {
 	auth, err := rpc.RequireAnyScope(ctx, ScopeUser)
 	if err != nil {
-		return nil, err //nolint:wrapcheck
+		return nil, err
 	}
 
 	targetOwner := auth.Claims.Subject
@@ -498,7 +498,7 @@ func (s *Service) GetProperties(
 ) (*user.GetPropertiesResponse, error) {
 	auth, err := rpc.RequireAnyScope(ctx, ScopeUser)
 	if err != nil {
-		return nil, err //nolint:wrapcheck
+		return nil, err
 	}
 
 	props, err := s.store.GetProperties(ctx, auth.Claims.Subject, req.Application, req.Keys)
@@ -528,7 +528,7 @@ func (s *Service) SetProperties(
 ) (*user.SetPropertiesResponse, error) {
 	auth, err := rpc.RequireAnyScope(ctx, ScopeUser)
 	if err != nil {
-		return nil, err //nolint:wrapcheck
+		return nil, err
 	}
 
 	updates := make([]PropertyUpdate, len(req.Properties))
@@ -554,7 +554,7 @@ func (s *Service) DeleteProperties(
 ) (*user.DeletePropertiesResponse, error) {
 	auth, err := rpc.RequireAnyScope(ctx, ScopeUser)
 	if err != nil {
-		return nil, err //nolint:wrapcheck
+		return nil, err
 	}
 
 	deletes := make([]PropertyDelete, len(req.Properties))
@@ -579,7 +579,7 @@ func (s *Service) PollEventLog(
 ) (*user.PollEventLogResponse, error) {
 	auth, err := rpc.RequireAnyScope(ctx, ScopeUser)
 	if err != nil {
-		return nil, err //nolint:wrapcheck
+		return nil, err
 	}
 
 	owners := getAllOwners(auth)
@@ -672,7 +672,7 @@ func (s *Service) DeleteInboxMessage(
 ) (*user.DeleteInboxMessageResponse, error) {
 	auth, err := rpc.RequireAnyScope(ctx, ScopeUser)
 	if err != nil {
-		return nil, err //nolint:wrapcheck
+		return nil, err
 	}
 
 	if req.Id < 1 {
@@ -696,7 +696,7 @@ func (s *Service) ListInboxMessages(
 ) (*user.ListInboxMessagesResponse, error) {
 	auth, err := rpc.RequireAnyScope(ctx, ScopeUser)
 	if err != nil {
-		return nil, err //nolint:wrapcheck
+		return nil, err
 	}
 
 	size := int64(10)
@@ -745,7 +745,7 @@ func (s *Service) PollInboxMessages(
 ) (*user.PollInboxMessagesResponse, error) {
 	auth, err := rpc.RequireAnyScope(ctx, ScopeUser)
 	if err != nil {
-		return nil, err //nolint:wrapcheck
+		return nil, err
 	}
 
 	// Start listening for new messages.
@@ -772,7 +772,7 @@ func (s *Service) PollInboxMessages(
 			ctx, auth.Claims.Subject, req.AfterId, limit,
 		)
 		if err != nil {
-			return nil, err //nolint:wrapcheck
+			return nil, fmt.Errorf("after id %d: %w", req.AfterId, err)
 		}
 
 		var res []*user.InboxMessage
@@ -841,7 +841,7 @@ func (s *Service) PollMessages(
 ) (*user.PollMessagesResponse, error) {
 	auth, err := rpc.RequireAnyScope(ctx, ScopeUser)
 	if err != nil {
-		return nil, err //nolint:wrapcheck
+		return nil, err
 	}
 
 	// Start listening for new messages.
@@ -868,7 +868,7 @@ func (s *Service) PollMessages(
 			ctx, auth.Claims.Subject, req.AfterId, limit,
 		)
 		if err != nil {
-			return nil, err //nolint:wrapcheck
+			return nil, fmt.Errorf("after id %d: %w", req.AfterId, err)
 		}
 
 		var res []*user.Message
@@ -938,7 +938,7 @@ func (s *Service) PushInboxMessage(
 ) (*user.PushInboxMessageResponse, error) {
 	auth, err := rpc.RequireAnyScope(ctx, ScopeUser)
 	if err != nil {
-		return nil, err //nolint:wrapcheck
+		return nil, err
 	}
 
 	if req.Recipient == "" {
@@ -997,7 +997,7 @@ func (s *Service) PushMessage(
 ) (*user.PushMessageResponse, error) {
 	auth, err := rpc.RequireAnyScope(ctx, ScopeUser)
 	if err != nil {
-		return nil, err //nolint:wrapcheck
+		return nil, err
 	}
 
 	if req.Recipient == "" {
@@ -1043,7 +1043,7 @@ func (s *Service) UpdateInboxMessage(
 ) (*user.UpdateInboxMessageResponse, error) {
 	auth, err := rpc.RequireAnyScope(ctx, ScopeUser)
 	if err != nil {
-		return nil, err //nolint:wrapcheck
+		return nil, err
 	}
 
 	if req.Id < 1 {
