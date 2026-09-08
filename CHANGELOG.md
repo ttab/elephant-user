@@ -4,7 +4,7 @@ All notable changes to elephant-user from v1.0.0 onwards are documented here.
 Entries are derived from the release tags; the linked pull requests hold the
 detail. Earlier history is not reconstructed.
 
-## [v1.4.0] - Unreleased
+## [v1.4.0] - 2026-09-08
 
 **Behaviour change (authentication):** a request with an invalid or missing
 token is answered `unauthenticated` (HTTP 401) where it was answered
