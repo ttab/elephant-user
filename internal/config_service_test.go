@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"connectrpc.com/connect"
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/ttab/elephant-api/newsdoc"
@@ -162,21 +163,21 @@ func TestConfiguration(t *testing.T) {
 		&user.RegisterConfigGenerationRequest{
 			Schemas: register1.Generation.Schemas,
 		})
-	test.IsTwirpError(t, err, twirp.PermissionDenied)
+	test.IsRPCError(t, err, connect.CodePermissionDenied)
 
 	_, err = eu.Configuration.RegisterConfigGeneration(readCtx,
 		&user.RegisterConfigGenerationRequest{
 			Schemas: register1.Generation.Schemas,
 		})
-	test.IsTwirpError(t, err, twirp.PermissionDenied)
+	test.IsRPCError(t, err, connect.CodePermissionDenied)
 
 	_, err = eu.Configuration.GetActiveConfigGeneration(userCtx,
 		&user.GetActiveConfigGenerationRequest{})
-	test.IsTwirpError(t, err, twirp.PermissionDenied)
+	test.IsRPCError(t, err, connect.CodePermissionDenied)
 
 	_, err = eu.Configuration.RegisterConfigGeneration(adminCtx,
 		&user.RegisterConfigGenerationRequest{})
-	test.IsTwirpError(t, err, twirp.InvalidArgument)
+	test.IsRPCError(t, err, connect.CodeInvalidArgument)
 
 	_, err = eu.Configuration.RegisterConfigGeneration(adminCtx,
 		&user.RegisterConfigGenerationRequest{
@@ -189,7 +190,7 @@ func TestConfiguration(t *testing.T) {
 				},
 			},
 		})
-	test.IsTwirpError(t, err, twirp.InvalidArgument)
+	test.IsRPCError(t, err, connect.CodeInvalidArgument)
 
 	_, err = eu.Configuration.RegisterConfigGeneration(adminCtx,
 		&user.RegisterConfigGenerationRequest{
@@ -202,7 +203,7 @@ func TestConfiguration(t *testing.T) {
 				},
 			},
 		})
-	test.IsTwirpError(t, err, twirp.InvalidArgument)
+	test.IsRPCError(t, err, connect.CodeInvalidArgument)
 
 	_, err = eu.Configuration.RegisterConfigGeneration(adminCtx,
 		&user.RegisterConfigGenerationRequest{
@@ -215,7 +216,7 @@ func TestConfiguration(t *testing.T) {
 				},
 			},
 		})
-	test.IsTwirpError(t, err, twirp.InvalidArgument)
+	test.IsRPCError(t, err, connect.CodeInvalidArgument)
 
 	_, err = eu.Configuration.RegisterConfigGeneration(adminCtx,
 		&user.RegisterConfigGenerationRequest{
@@ -227,7 +228,7 @@ func TestConfiguration(t *testing.T) {
 				},
 			},
 		})
-	test.IsTwirpError(t, err, twirp.InvalidArgument)
+	test.IsRPCError(t, err, connect.CodeInvalidArgument)
 
 	_, err = eu.Configuration.RegisterConfigGeneration(adminCtx,
 		&user.RegisterConfigGenerationRequest{
@@ -244,12 +245,12 @@ func TestConfiguration(t *testing.T) {
 				},
 			},
 		})
-	test.IsTwirpError(t, err, twirp.InvalidArgument)
+	test.IsRPCError(t, err, connect.CodeInvalidArgument)
 
 	// Documents of a type that only the inactive extra generation
 	// declares must not validate yet.
 	_, err = eu.Settings.UpdateDocument(userCtx, hotReloadDocument())
-	test.MustNotf(t, err, "update document with inactive schema type")
+	test.IsRPCError(t, err, connect.CodeInvalidArgument)
 
 	// Activate the extra generation and refresh the validator.
 	activate1, err := eu.Configuration.ActivateConfigGeneration(adminCtx,
@@ -265,7 +266,7 @@ func TestConfiguration(t *testing.T) {
 		&user.ActivateConfigGenerationRequest{
 			Id: 10000,
 		})
-	test.IsTwirpError(t, err, twirp.NotFound)
+	test.IsRPCError(t, err, connect.CodeNotFound)
 
 	err = eu.Validator.RefreshSchemas(ctx)
 	test.Mustf(t, err, "refresh schemas")
@@ -338,7 +339,7 @@ func TestConfiguration(t *testing.T) {
 		&user.GetSchemaRequest{
 			Name: "no-such-schema",
 		})
-	test.IsTwirpError(t, err, twirp.NotFound)
+	test.IsRPCError(t, err, connect.CodeNotFound)
 
 	// Long-poll for generation changes while registering and
 	// activating a third generation.
@@ -408,7 +409,7 @@ func TestConfiguration(t *testing.T) {
 	// The extra settings type was not carried over to the third
 	// generation.
 	_, err = eu.Settings.UpdateDocument(userCtx, hotReloadDocument())
-	test.MustNotf(t, err, "update document with type from replaced generation")
+	test.IsRPCError(t, err, connect.CodeInvalidArgument)
 
 	// Usage separation: a settings document type must not validate as
 	// an inbox message.
@@ -420,7 +421,7 @@ func TestConfiguration(t *testing.T) {
 			Title: "Not an inbox message",
 		},
 	})
-	test.MustNotf(t, err, "push settings document as inbox message")
+	test.IsRPCError(t, err, connect.CodeInvalidArgument)
 
 	// Deprecations: unenforced deprecations are counted but allowed.
 
@@ -442,7 +443,7 @@ func TestConfiguration(t *testing.T) {
 				Enforced: true,
 			},
 		})
-	test.IsTwirpError(t, err, twirp.PermissionDenied)
+	test.IsRPCError(t, err, connect.CodePermissionDenied)
 
 	_, err = eu.Configuration.UpdateDeprecation(adminCtx,
 		&user.UpdateDeprecationRequest{
@@ -457,7 +458,7 @@ func TestConfiguration(t *testing.T) {
 	test.Mustf(t, err, "refresh schemas after enforcing deprecation")
 
 	_, err = eu.Settings.UpdateDocument(userCtx, deprecatedDocument())
-	test.MustNotf(t, err, "update document with enforced deprecation")
+	test.IsRPCError(t, err, connect.CodeInvalidArgument)
 
 	deprecations, err := eu.Configuration.GetDeprecations(readCtx,
 		&user.GetDeprecationsRequest{})

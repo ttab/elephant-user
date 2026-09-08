@@ -1,3 +1,11 @@
+-- covers: github.com/ttab/elephantine pg/joblock/schema/001_job_lock.sql
+--
+-- The job_lock table below was written by hand before elephantine shipped the
+-- migration, and is identical to it. It is kept rather than re-vendored: the
+-- table already exists in every database this service has, and tern records a
+-- migration as applied by number, so a second copy under a new number would
+-- do nothing.
+
 CREATE TABLE IF NOT EXISTS "user"(
   sub text primary key,
   created timestamptz not null default now()

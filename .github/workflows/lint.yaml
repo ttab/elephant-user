@@ -18,5 +18,10 @@ jobs:
       - name: golangci-lint
         uses: golangci/golangci-lint-action@v9
         with:
-          version: v2.12.2
+          version: v2.13
           args: --timeout=4m
+      - name: Check documentation links
+        # Always, so that a broken link is reported in the same run as
+        # whatever golangci-lint found rather than in the one after the fix.
+        if: ${{ !cancelled() }}
+        run: go run github.com/magefile/mage docs:links

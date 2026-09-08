@@ -1,9 +1,11 @@
 package internal_test
 
 import (
+	"context"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -13,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"connectrpc.com/connect"
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/prometheus/client_golang/prometheus"
@@ -312,7 +315,7 @@ func TestService(t *testing.T) {
 		SchemaVersion: "v1.0.0",
 		Payload:       &newsdoc.Document{Type: docType, Title: "Org wide access"},
 	})
-	test.MustNotf(t, err, "create shared document as non-admin")
+	test.IsRPCError(t, err, connect.CodePermissionDenied)
 
 	_, err = eu.Settings.UpdateDocument(adminAuthCtx, &user.UpdateDocumentRequest{
 		Owner:         orgTest,
@@ -347,7 +350,7 @@ func TestService(t *testing.T) {
 		Type:        docType,
 		Key:         docKey,
 	})
-	test.MustNotf(t, err, "get shared doc from org it doesn't belong to")
+	test.IsRPCError(t, err, connect.CodePermissionDenied)
 
 	_, err = eu.Settings.UpdateDocument(adminAuthCtx, &user.UpdateDocumentRequest{
 		Owner:         "core://unit/other",
@@ -357,7 +360,7 @@ func TestService(t *testing.T) {
 		SchemaVersion: "v1.0.0",
 		Payload:       &newsdoc.Document{Type: docType, Title: "Unit wide access"},
 	})
-	test.MustNotf(t, err, "create shared doc for unit it doesn't belong to")
+	test.IsRPCError(t, err, connect.CodePermissionDenied)
 
 	// Event log for shared documents
 
@@ -426,7 +429,15 @@ func startElephantUser(t *testing.T) TestElephantUser {
 
 	store := internal.NewPGStore(logger, dbpool)
 
-	go store.RunSubscriber(ctx, dbpool)
+	subscriber := store.NewSubscriber(dbpool)
+
+	go func() {
+		err := subscriber.Run(ctx)
+		if err != nil && !errors.Is(err, context.Canceled) {
+			logger.Error("pg subscriber stopped",
+				elephantine.LogKeyError, err)
+		}
+	}()
 
 	// Seed the embedded schemas before constructing the validator so
 	// that its initial load picks them up.
@@ -436,7 +447,10 @@ func startElephantUser(t *testing.T) TestElephantUser {
 
 	reg := prometheus.NewRegistry()
 
-	validator, err := internal.NewValidator(ctx, logger, store, reg)
+	metrics, err := internal.NewMetrics(reg)
+	test.Mustf(t, err, "create metrics")
+
+	validator, err := internal.NewValidator(ctx, logger, store, metrics)
 	test.Mustf(t, err, "create validator")
 
 	t.Cleanup(validator.Stop)
