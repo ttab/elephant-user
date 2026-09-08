@@ -22,8 +22,9 @@ strictly ordered, and everything after the pools is wired through
 
 ```
 main.go
-  pubsubPool  = pgxpool.New(CONN_STRING)           direct connection: LISTEN needs a session
-  dbpool      = pubsubPool, or pgxpool.New(BOUNCER_CONN_STRING) if set
+  pubsubPool  = newPool(CONN_STRING, DB_MAX_CONNS)  direct connection: LISTEN needs a session
+  dbpool      = pubsubPool, or newPool(BOUNCER_CONN_STRING, DB_MAX_CONNS) if set,
+                in which case pubsubPool is sized 2 (LISTEN + startup migration)
   pool metrics registered ("main", and "pubsub" when they differ)
   [--migrate-db] internal.Migrate(pubsubPool)      disposable environments only, see ops.md
   auth        = OIDC discovery + JWKS from OIDC_CONFIG
@@ -32,7 +33,7 @@ main.go
   validator   = internal.NewValidator(store)        loads active schemas, or fails startup
                 └─ go reloadLoop                    NOTIFY-driven, 5 min recheck
   subscriber  = store.NewSubscriber(pubsubPool)     one LISTEN connection, feeds the FanOuts
-  server      = elephantine.NewAPIServer(...)       readiness: postgres (required), schemas (optional)
+  server      = elephantine.NewAPIServer(...)       readiness entries: postgres, schemas (both optional)
 
 internal.Run: elephantine.NewErrGroup
   Required      "server"   APIServer.ListenAndServe(grace.CancelOnQuit)

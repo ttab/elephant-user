@@ -32,10 +32,6 @@ v0.29.0 requires. A build box pinned to an older toolchain with
 `GOTOOLCHAIN=local` fails on the upgrade; `GOTOOLCHAIN=auto` downloads it. The
 Docker build image moves to `golang:1.27.1-alpine3.24`. (#76)
 
-**Behaviour change (readiness):** `/health/ready` now fails when Postgres is
-unreachable. Previously the probe stayed green while every request failed.
-(#76)
-
 **Migrations:**
 
 - `schema/004_sequence_counter.sql` creates the `sequence_counter` table seeded
@@ -59,6 +55,14 @@ Changes:
   transaction's last lock. (#75)
 - New `--cleanup-interval` flag (`CLEANUP_INTERVAL`, default `12h`) controls how
   often expired messages and inbox messages are removed. (#76)
+- New `--db-max-conns` flag (`DB_MAX_CONNS`, default `16`) sets the query pool
+  size explicitly instead of letting it follow the node's CPU count; `0`
+  restores that default. With a bouncer configured the direct pool is fixed at
+  2. (#76)
+- `/health/ready` reports a `postgres` entry alongside `schemas`. Both are
+  optional: they show in the body and in `health_check_up{name}` without
+  failing the probe, so a starved pool cannot pull every replica from the load
+  balancer at once. (#76)
 - `GET /version` reports the build version (set via `-ldflags "-X main.version"`,
   Dockerfile build arg `VERSION`) and the elephant-api/elephantine module versions.
   (#76)

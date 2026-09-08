@@ -69,8 +69,8 @@ customer and does not label by org).
 
 From elephantine's `pg.NewPoolStatCollector`, one series set per pool: `main`
 always, `pubsub` only when a bouncer connection string is configured and the
-pools differ. Pool size is not configured explicitly and defaults to the host
-CPU count, so `max_conns` reports the node the pod landed on, not a decision.
+pools differ. `pgxpool_max_conns` is the configured size: `DB_MAX_CONNS`
+(default 16) for the query pool, 2 for a dedicated LISTEN pool.
 
 - `pgxpool_acquired_conns{pool}` against `pgxpool_max_conns{pool}` — the
   saturation pair. `acquired` sitting at `max` while
@@ -113,12 +113,13 @@ CPU count, so `max_conns` reports the node the pod landed on, not a decision.
 
 ## Readiness
 
-- `health_check_up{name}` — 1 while the named readiness check passes.
-  `name="postgres"` is required: 0 turns `/health/ready` into a 500 and the
-  pod out of the load balancer. `name="schemas"` is optional: 0 means the
-  active generation lacks a `settings` or `messages` schema, every validated
-  write is failing, and the probe stays green on purpose so the generation can
-  be registered through the service's own API.
+- `health_check_up{name}` — 1 while the named readiness check passes. Both
+  checks are optional: they are reported in the `/health/ready` body and never
+  turn the probe red, so a replica is only pulled from the load balancer when
+  the process itself is gone. `name="postgres"` at 0 means the query pool
+  cannot reach the database or is starved; `name="schemas"` at 0 means the
+  active generation lacks a `settings` or `messages` schema and every
+  validated write is failing. Alert on both.
 
 ## State gauges
 

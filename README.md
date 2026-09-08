@@ -127,7 +127,7 @@ the second column.
 | Flag | Env | Default | What it does |
 |---|---|---|---|
 | `--addr` | `ADDR` | `:1080` | Plain HTTP listener: the Twirp APIs, `/health/alive`, `/version`. Serves HTTP/1.1 and HTTP/2. |
-| `--profile-addr` | `PROFILE_ADDR` | `:1081` | Internal listener: `/health/ready`, `/metrics`, `/debug/pprof`, `/debug/bom`. Unauthenticated; never expose it. |
+| `--profile-addr` | `PROFILE_ADDR` | `:1081` | Internal listener: `/health/ready` (all checks optional: the body reports `postgres` and `schemas`, the status stays 200 while the process is up), `/metrics`, `/debug/pprof`, `/debug/bom`. Unauthenticated; never expose it. |
 | `--tls-addr` | `TLS_ADDR`, `TLS_LISTEN_ADDR` | `:1443` | HTTPS listener, only opened when `--cert-file` is set. |
 | `--cert-file` | `TLS_CERT_PATH` | | PEM certificate. Setting it is the switch for the TLS listener. |
 | `--key-file` | `TLS_KEY_PATH` | | PEM private key for the certificate. |
@@ -140,10 +140,15 @@ the second column.
 |---|---|---|---|
 | `--db` | `CONN_STRING` | local dev database | Direct Postgres connection. Used for LISTEN/NOTIFY, migrations and, without a bouncer, all queries. Must not point at PgBouncer in transaction-pooling mode: LISTEN is a session-level command and silently never fires through it. |
 | `--db-bouncer` | `BOUNCER_CONN_STRING` | | PgBouncer connection string. When set and different from `--db`, all queries go through it and only the LISTEN connection stays direct. |
+| `--db-max-conns` | `DB_MAX_CONNS` | `16` | Size of the query pool; see the sizing note below. `0` or less leaves it to pgx (`max(4, NumCPU)` of the node). With a bouncer configured this sizes the bouncer pool and the direct pool is fixed at 2 (the LISTEN session and startup migrations). |
 | `--migrate-db` | `MIGRATE_DB` | `false` | Apply pending migrations at startup. For disposable environments only; production migrations run through elephant-platform, and this flag is slated for removal. |
 
-Neither pool sets `MaxConns`, so the pool size is `max(4, NumCPU)` of the
-host. Add `pool_max_conns=<n>` to the connection string to pin it.
+The pool is sized explicitly because pgx's default is `max(4, NumCPU)` read
+from the node's cpuset, which changes on reschedule. Every RPC runs one to
+three short queries and long-polls hold no connection while waiting, so 16
+covers a burst of concurrent writes plus the cleaner's lock ping and sweep and
+the validator's reload. Trim it once `pgxpool_empty_acquire_wait_seconds_total`
+says what the service actually needs.
 
 ### Authentication
 
@@ -169,11 +174,6 @@ schema; the flag came in with the schema work in v1.3.0 and the PR #75 review
 asked for it to stay out of production. Removing it also removes
 `internal/migrate.go`. Embedding the migrations stays, because the tests and
 the platform tooling read them.
-
-**Pool sizing is undecided.** Both pools take pgxpool's default of the host
-CPU count, which changes with the node the pod lands on. A number sized for
-the workload belongs in `pool_max_conns` on both connection strings; it needs
-a look at `pgxpool_empty_acquire_wait_seconds_total` under real load first.
 
 **Connect dual-stack.** The fleet is moving from Twirp to Connect and this
 service already carries the shared infrastructure (authentication middleware,

@@ -47,7 +47,7 @@ down at once.
 
 | Role | Configuration | Runs |
 |---|---|---|
-| API replica | `CONN_STRING` (direct), optional `BOUNCER_CONN_STRING`, `OIDC_CONFIG`, `CORS_HOSTS`, TLS paths | the API, its own LISTEN connection, and a candidate for the cleaner lock |
+| API replica | `CONN_STRING` (direct), optional `BOUNCER_CONN_STRING`, `DB_MAX_CONNS` (16), `OIDC_CONFIG`, `CORS_HOSTS`, TLS paths | the API, its own LISTEN connection, and a candidate for the cleaner lock |
 
 There is one role. Replicas scale RPC throughput and long-poll fan-out; each
 replica adds one LISTEN session to the direct database. The cleaner does not
@@ -58,7 +58,7 @@ does not need to.
 
 | Dependency | Needed for | Without it |
 |---|---|---|
-| Postgres, direct connection (`CONN_STRING`) | LISTEN/NOTIFY, migrations, and all queries unless a bouncer is configured | startup fails on the initial ping; at runtime the `postgres` readiness check fails and the replica leaves the load balancer |
+| Postgres, direct connection (`CONN_STRING`) | LISTEN/NOTIFY, migrations, and all queries unless a bouncer is configured | startup fails on the initial ping; at runtime every query fails and the `postgres` readiness entry reports it, but the probe stays green (see below) |
 | Postgres via PgBouncer (`BOUNCER_CONN_STRING`, optional) | all queries when configured | same as above for queries; LISTEN is unaffected because it never goes through the bouncer |
 | OIDC provider (`OIDC_CONFIG`) | discovery document and JWKS at startup, key refresh afterwards | startup fails; a running replica keeps validating with cached keys until a key rotates |
 | An active config generation | validating `UpdateDocument` and `PushInboxMessage` | those two RPCs fail with an internal error; everything else works; readiness reports `schemas` as failing but stays green |
@@ -280,15 +280,23 @@ Action: wait out five minutes, then treat as the LISTEN failure. If reloads
 fail, the generation itself is broken; the dry-run at registration should
 have prevented it, so read the error — it names the schema.
 
-### `/health/ready` is red, `postgres` failing
+### The `postgres` readiness entry is failing
 
-The replica cannot ping the database it runs queries against. It has left the
-load balancer, which is correct.
+The replica cannot ping the database it runs queries against, or cannot get a
+connection out of its pool in time. The probe stays 200 on purpose: readiness
+checks here are all optional. A starved pool would otherwise fail the probe on
+every replica at once and pull the whole service out of the load balancer
+while it was still answering most requests, which has happened elsewhere in
+the fleet. The check is a signal, not a gate.
 
-Signal: `health_check_up{name="postgres"} == 0`; `pgxpool_canceled_acquires_total` rising just before.
+Signal: `health_check_up{name="postgres"} == 0`; `pgxpool_canceled_acquires_total`
+and `pgxpool_empty_acquire_wait_seconds_total` rising alongside it say
+starvation, a flat pool says the database or network.
 
-Action: this is Postgres or the bouncer, not the service. If only one replica
-shows it, its node's network.
+Action: starvation means the pool is too small for the load — raise
+`DB_MAX_CONNS` (default 16) and check the bouncer's per-client limit. If the
+pool is idle, this is Postgres or the network, not the service; if only one
+replica shows it, its node.
 
 ### Readiness is green but the pod keeps restarting
 
@@ -361,8 +369,8 @@ overwrote the first; the eventlog shows both versions. Known limitation; an
    arriving; `task_restarts_total{task="pubsub"}` says whether the subscriber
    is fighting to reconnect.
 5. `pgxpool_empty_acquire_wait_seconds_total{pool="main"}` — connection
-   queuing; the pool is sized by CPU count, not by decision, so this is the
-   number that says the default is wrong.
+   queuing; the pool is 16 by default, and this is the number that says
+   whether that is right for the load.
 
 ## Common operations
 
@@ -423,10 +431,6 @@ unauthenticated and internal only.
 - **`--migrate-db` still exists.** It contradicts the rule that services do
   not migrate themselves and is slated for removal; until then it must stay
   off in production.
-- **Pool size is the CPU-count default.** `pgxpool` picks
-  `max(4, NumCPU)` from the cpuset, which tracks the node, so the pool changes
-  size on reschedule. Set `pool_max_conns` in the connection strings once a
-  workload-based number is agreed.
 - **No idempotency on pushes.** A retried `PushInboxMessage` duplicates.
   Planned with the inbox redesign.
 - **Connect is not mounted yet.** Only `/twirp/` paths exist; the dual-stack
