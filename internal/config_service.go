@@ -93,21 +93,20 @@ func (s *ConfigurationService) RegisterConfigGeneration(
 		}
 
 		if seen[schema.Name] {
-			return nil, rpc.Errorf(connect.CodeInvalidArgument,
-				"schemas.%d.name: %q listed twice",
-				i, schema.Name)
+			return nil, rpc.InvalidArgumentf(
+				fmt.Sprintf("schemas.%d.name", i),
+				"%q is listed twice", schema.Name)
 		}
 
 		seen[schema.Name] = true
 
 		usage, err := schemaUsageFromRPC(schema.Usage)
 		if err != nil {
-			return nil, rpc.Errorf(connect.CodeInvalidArgument,
-				"schema %s@%s: %v",
-				schema.Name, schema.Version, err)
+			return nil, rpc.InvalidArgumentf(
+				fmt.Sprintf("schemas.%d.usage", i), "%w", err)
 		}
 
-		cs, err := s.resolveConstraintSet(ctx, schema)
+		cs, err := s.resolveConstraintSet(ctx, i, schema)
 		if err != nil {
 			return nil, err
 		}
@@ -129,7 +128,7 @@ func (s *ConfigurationService) RegisterConfigGeneration(
 		_, err := revisor.NewValidator(sets...)
 		if err != nil {
 			return nil, rpc.Errorf(connect.CodeInvalidArgument,
-				"the schemas for usage %q cannot form a valid constraint set: %v",
+				"the schemas for usage %q cannot form a valid constraint set: %w",
 				usage, err)
 		}
 	}
@@ -139,7 +138,7 @@ func (s *ConfigurationService) RegisterConfigGeneration(
 	if errors.Is(err, ErrSchemaMismatch) || errors.Is(err, ErrSchemaSpecMissing) {
 		return nil, rpc.Errorf(connect.CodeInvalidArgument, "%w", err)
 	} else if err != nil {
-		return nil, rpc.Internalf("register generation: %v", err)
+		return nil, rpc.Internalf("register generation: %w", err)
 	}
 
 	return &user.RegisterConfigGenerationResponse{
@@ -148,11 +147,14 @@ func (s *ConfigurationService) RegisterConfigGeneration(
 }
 
 // resolveConstraintSet decodes the supplied schema spec, or loads the
-// stored spec when none is supplied.
+// stored spec when none is supplied. The index names the request field
+// in argument errors.
 func (s *ConfigurationService) resolveConstraintSet(
-	ctx context.Context, schema *user.ConfigGenerationSchema,
+	ctx context.Context, i int, schema *user.ConfigGenerationSchema,
 ) (revisor.ConstraintSet, error) {
 	var cs revisor.ConstraintSet
+
+	argument := fmt.Sprintf("schemas.%d.spec", i)
 
 	if schema.Spec != "" {
 		dec := json.NewDecoder(bytes.NewReader([]byte(schema.Spec)))
@@ -161,9 +163,8 @@ func (s *ConfigurationService) resolveConstraintSet(
 
 		err := dec.Decode(&cs)
 		if err != nil {
-			return cs, rpc.Errorf(connect.CodeInvalidArgument,
-				"invalid spec for schema %s@%s: %v",
-				schema.Name, schema.Version, err)
+			return cs, rpc.InvalidArgumentf(argument,
+				"is not a valid constraint set: %w", err)
 		}
 
 		return cs, nil
@@ -171,17 +172,17 @@ func (s *ConfigurationService) resolveConstraintSet(
 
 	stored, err := s.store.GetSchema(ctx, schema.Name, schema.Version)
 	if errors.Is(err, ErrSchemaNotFound) {
-		return cs, rpc.Errorf(connect.CodeInvalidArgument,
-			"schema %s@%s is not stored and no spec was supplied",
+		return cs, rpc.InvalidArgumentf(argument,
+			"is required, %s@%s is not stored",
 			schema.Name, schema.Version)
 	} else if err != nil {
-		return cs, rpc.Internalf("get stored schema: %v", err)
+		return cs, rpc.Internalf("get stored schema: %w", err)
 	}
 
 	err = json.Unmarshal(stored.Spec, &cs)
 	if err != nil {
 		return cs, rpc.Internalf(
-			"decode stored schema %s@%s: %v",
+			"decode stored schema %s@%s: %w",
 			schema.Name, schema.Version, err)
 	}
 
@@ -205,7 +206,7 @@ func (s *ConfigurationService) ActivateConfigGeneration(
 	if errors.Is(err, ErrGenerationNotFound) {
 		return nil, rpc.NotFound("no such generation")
 	} else if err != nil {
-		return nil, rpc.Internalf("activate generation: %v", err)
+		return nil, rpc.Internalf("activate generation: %w", err)
 	}
 
 	return &user.ActivateConfigGenerationResponse{
@@ -231,7 +232,7 @@ func (s *ConfigurationService) GetActiveConfigGeneration(
 		}
 
 		return nil, rpc.Internalf(
-			"wait for generation change: %v", err)
+			"wait for generation change: %w", err)
 	}
 
 	if !changed && req.OnlyChanged {
@@ -242,7 +243,7 @@ func (s *ConfigurationService) GetActiveConfigGeneration(
 
 	gen, err := s.store.GetActiveConfigGeneration(ctx)
 	if err != nil {
-		return nil, rpc.Internalf("get active generation: %v", err)
+		return nil, rpc.Internalf("get active generation: %w", err)
 	}
 
 	if gen == nil {
@@ -310,7 +311,7 @@ func (s *ConfigurationService) ListConfigGenerations(
 
 	generations, err := s.store.ListConfigGenerations(ctx, req.Before, pageSize)
 	if err != nil {
-		return nil, rpc.Internalf("list generations: %v", err)
+		return nil, rpc.Internalf("list generations: %w", err)
 	}
 
 	res := user.ListConfigGenerationsResponse{
@@ -342,7 +343,7 @@ func (s *ConfigurationService) GetSchema(
 	if errors.Is(err, ErrSchemaNotFound) {
 		return nil, rpc.NotFound("no such schema")
 	} else if err != nil {
-		return nil, rpc.Internalf("get schema: %v", err)
+		return nil, rpc.Internalf("get schema: %w", err)
 	}
 
 	return &user.GetSchemaResponse{
@@ -364,7 +365,7 @@ func (s *ConfigurationService) GetDeprecations(
 
 	deprecations, err := s.store.GetDeprecations(ctx)
 	if err != nil {
-		return nil, rpc.Internalf("list deprecations: %v", err)
+		return nil, rpc.Internalf("list deprecations: %w", err)
 	}
 
 	res := user.GetDeprecationsResponse{
@@ -403,7 +404,7 @@ func (s *ConfigurationService) UpdateDeprecation(
 		Enforced: req.Deprecation.Enforced,
 	})
 	if err != nil {
-		return nil, rpc.Internalf("update deprecation: %v", err)
+		return nil, rpc.Internalf("update deprecation: %w", err)
 	}
 
 	return &user.UpdateDeprecationResponse{}, nil

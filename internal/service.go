@@ -997,7 +997,7 @@ func (s *Service) PushInboxMessage(
 	})
 	if err != nil {
 		return nil, rpc.Internalf(
-			"failed to push inbox message: %w", err)
+			"push inbox message: %w", err)
 	}
 
 	return &user.PushInboxMessageResponse{}, nil
@@ -1043,7 +1043,7 @@ func (s *Service) PushMessage(
 	})
 	if err != nil {
 		return nil, rpc.Internalf(
-			"failed to push inbox message: %w", err)
+			"push message: %w", err)
 	}
 
 	return &user.PushMessageResponse{}, nil

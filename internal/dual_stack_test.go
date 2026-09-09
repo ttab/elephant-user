@@ -277,6 +277,34 @@ func TestDualStackErrorParity(t *testing.T) {
 		}
 	})
 
+	t.Run("schema argument", func(t *testing.T) {
+		adminCtx := bearerContext(t.Context(),
+			eu.AccessToken(t, userClaims("admin", "schema_admin")))
+
+		req := &user.RegisterConfigGenerationRequest{
+			Schemas: []*user.ConfigGenerationSchema{
+				{
+					Name:    "se.ecms.user.settings",
+					Version: "v1.0.0",
+					Usage:   user.SchemaUsage_SCHEMA_USAGE_SETTINGS,
+				},
+				{
+					Name:    "test.unknown",
+					Version: "v1.0.0",
+					Usage:   user.SchemaUsage_SCHEMA_USAGE_SETTINGS,
+				},
+			},
+		}
+
+		_, twirpErr := twirpClients.Configuration.RegisterConfigGeneration(adminCtx, req)
+		_, connectErr := connectClients.Configuration.RegisterConfigGeneration(adminCtx, req)
+
+		check(t, connect.CodeInvalidArgument, twirpErr, connectErr)
+
+		test.Equalf(t, "schemas.1.spec", rpc.Meta(connectErr)["argument"],
+			"name the schema entry that lacks a spec")
+	})
+
 	t.Run("wrong owner", func(t *testing.T) {
 		req := &user.GetDocumentRequest{
 			Owner:       "core://org/other",

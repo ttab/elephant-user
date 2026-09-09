@@ -33,6 +33,12 @@ Changes:
   stored-payload and marshalling failures that returned a plain Go error, which
   Twirp reported as `internal`, return `internal` explicitly on both stacks.
   (#78)
+- `RegisterConfigGeneration` names the offending request field in the
+  `argument` error metadata for a duplicate name, an unknown usage, an
+  undecodable spec and a missing spec for an unstored schema
+  (`schemas.<i>.name`, `.usage`, `.spec`), the way its required-field errors
+  already did. The message text of those four errors starts with the field
+  path. (#78)
 - `rpc_protocol_responses_total` reports `protocol="connect"` for calls on the
   Connect paths. (#78)
 - Dependency upgrades: elephant-api to v0.25.0, ttab/mage to v0.14.0 (sqlc
