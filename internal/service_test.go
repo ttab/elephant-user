@@ -21,9 +21,11 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/ttab/elephant-api/newsdoc"
 	"github.com/ttab/elephant-api/user"
+	"github.com/ttab/elephant-api/user/userconnect"
 	"github.com/ttab/elephant-user/internal"
 	"github.com/ttab/elephant-user/schema"
 	"github.com/ttab/elephantine"
+	"github.com/ttab/elephantine/rpc"
 	"github.com/ttab/elephantine/test"
 	"github.com/ttab/eltest"
 	"github.com/twitchtv/twirp"
@@ -52,9 +54,7 @@ func TestService(t *testing.T) {
 
 	ctx := t.Context()
 
-	authCtx, _ := twirp.WithHTTPRequestHeaders(ctx, http.Header{
-		"Authorization": []string{"Bearer " + userToken},
-	})
+	authCtx := bearerContext(ctx, userToken)
 
 	wg := sync.WaitGroup{}
 
@@ -290,9 +290,7 @@ func TestService(t *testing.T) {
 		Org:   orgTest,
 	})
 
-	adminAuthCtx, _ := twirp.WithHTTPRequestHeaders(ctx, http.Header{
-		"Authorization": []string{"Bearer " + adminToken},
-	})
+	adminAuthCtx := bearerContext(ctx, adminToken)
 
 	otherUserToken := eu.AccessToken(t, elephantine.JWTClaims{
 		Scope: "user",
@@ -303,9 +301,7 @@ func TestService(t *testing.T) {
 		Org: "core://org/other",
 	})
 
-	otherUserAuthCtx, _ := twirp.WithHTTPRequestHeaders(ctx, http.Header{
-		"Authorization": []string{"Bearer " + otherUserToken},
-	})
+	otherUserAuthCtx := bearerContext(ctx, otherUserToken)
 
 	_, err = eu.Settings.UpdateDocument(authCtx, &user.UpdateDocumentRequest{
 		Owner:         orgTest,
@@ -394,9 +390,96 @@ type TestElephantUser struct {
 	Messages      user.Messages
 	Settings      user.Settings
 	Configuration user.Configuration
-	Store         *internal.PGStore
-	Validator     *internal.Validator
-	Registry      *prometheus.Registry
+	// Stack is the protocol stack the clients were built for. Client
+	// and BaseURL are there for tests that need the other stack or a
+	// raw HTTP call.
+	Stack     rpcStack
+	Client    *http.Client
+	BaseURL   string
+	Store     *internal.PGStore
+	Validator *internal.Validator
+	Registry  *prometheus.Registry
+}
+
+// rpcStack is the protocol stack the test clients are built for. Both
+// stacks are always mounted; this only decides which client constructors
+// the tests get, so the whole suite can be run against either.
+type rpcStack string
+
+const (
+	stackTwirp   rpcStack = "twirp"
+	stackConnect rpcStack = "connect"
+)
+
+// stackEnvVar selects the stack the suite runs against.
+const stackEnvVar = "TEST_RPC_STACK"
+
+// defaultStack is the stack the suite runs against unless TEST_RPC_STACK
+// says otherwise. Twirp is the default because it is the stack in
+// production use; the CI test job runs the suite a second time with
+// TEST_RPC_STACK=connect.
+func defaultStack(t *testing.T) rpcStack {
+	t.Helper()
+
+	switch v := os.Getenv(stackEnvVar); v {
+	case "", string(stackTwirp):
+		return stackTwirp
+	case string(stackConnect):
+		return stackConnect
+	default:
+		t.Fatalf("unknown %s value %q, expected %q or %q",
+			stackEnvVar, v, stackTwirp, stackConnect)
+
+		return ""
+	}
+}
+
+// bearerContext attaches the bearer token for whichever stack the client
+// uses: the Twirp clients read twirp.WithHTTPRequestHeaders, the Connect
+// clients read rpc.WithOutgoingHeaders through the PropagateHeaders
+// interceptor.
+func bearerContext(ctx context.Context, token string) context.Context {
+	h := http.Header{
+		"Authorization": []string{"Bearer " + token},
+	}
+
+	ctx, _ = twirp.WithHTTPRequestHeaders(ctx, h)
+
+	return rpc.WithOutgoingHeaders(ctx, h)
+}
+
+type serviceClients struct {
+	Messages      user.Messages
+	Settings      user.Settings
+	Configuration user.Configuration
+}
+
+// newClients builds the three service clients for a stack. Both return the
+// plain service interfaces, so the tests do not know which one they got.
+func newClients(
+	stack rpcStack, client *http.Client, baseURL string,
+	opts ...connect.ClientOption,
+) serviceClients {
+	if stack == stackTwirp {
+		return serviceClients{
+			Messages:      user.NewMessagesProtobufClient(baseURL, client),
+			Settings:      user.NewSettingsProtobufClient(baseURL, client),
+			Configuration: user.NewConfigurationProtobufClient(baseURL, client),
+		}
+	}
+
+	// The Connect clients read the bearer token that bearerContext puts
+	// on the context through the PropagateHeaders interceptor.
+	opts = append(opts, connect.WithInterceptors(rpc.PropagateHeaders()))
+
+	return serviceClients{
+		Messages: userconnect.NewMessagesServiceClient(
+			client, baseURL, opts...),
+		Settings: userconnect.NewSettingsServiceClient(
+			client, baseURL, opts...),
+		Configuration: userconnect.NewConfigurationServiceClient(
+			client, baseURL, opts...),
+	}
 }
 
 func (teu *TestElephantUser) AccessToken(t *testing.T, claims elephantine.JWTClaims) string {
@@ -478,17 +561,19 @@ func startElephantUser(t *testing.T) TestElephantUser {
 	})
 	test.Mustf(t, err, "run application")
 
-	messages := user.NewMessagesProtobufClient("http://"+apiServer.Addr(), client)
-	settings := user.NewSettingsProtobufClient("http://"+apiServer.Addr(), client)
-	configuration := user.NewConfigurationProtobufClient(
-		"http://"+apiServer.Addr(), client,
-	)
+	stack := defaultStack(t)
+	baseURL := "http://" + apiServer.Addr()
+
+	clients := newClients(stack, client, baseURL)
 
 	return TestElephantUser{
 		JWTKey:        jwtKey,
-		Messages:      messages,
-		Settings:      settings,
-		Configuration: configuration,
+		Messages:      clients.Messages,
+		Settings:      clients.Settings,
+		Configuration: clients.Configuration,
+		Stack:         stack,
+		Client:        client,
+		BaseURL:       baseURL,
 		Store:         store,
 		Validator:     validator,
 		Registry:      reg,

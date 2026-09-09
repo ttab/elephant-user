@@ -319,11 +319,17 @@ The two embedded constraint sets, `internal/se.ecms.user.settings.json` and
 as generation 1, and a new environment registers them through the API. The
 service never seeds itself.
 
-## Twirp APIs
+## RPC APIs
 
-All RPCs are `POST /twirp/elephant.user.<Service>/<Method>`, protobuf or
-JSON, defined in `github.com/ttab/elephant-api/user`. Every request carries a
-bearer JWT; authentication is HTTP middleware in front of every handler, and a
+Every RPC is served on two paths from the same handler, defined in
+`github.com/ttab/elephant-api/user`:
+
+- Twirp: `POST /twirp/elephant.user.<Service>/<Method>`, protobuf or JSON.
+- Connect: `POST /elephant.user.<Service>/<Method>`, protobuf or JSON, and
+  gRPC over HTTP/2 on the same path. Adapters in
+  `elephant-api/user/userconnect`.
+
+Every request carries a bearer JWT; authentication is HTTP middleware in front of every handler, and a
 missing or invalid token is `unauthenticated` (401). Each handler then checks
 its scope explicitly — an identified caller without the scope gets
 `permission_denied` (403) with the accepted scopes in the
@@ -345,8 +351,26 @@ group delivery must be read-side (a shared row matched against the reader's
 claims at poll time, as `PollEventLog` does), never push-time fan-out to
 enumerated members.
 
-Errors are Twirp errors today; scope checks already return the
-protocol-neutral `*connect.Error` from `elephantine/rpc`, which the Twirp
-mount translates on the way out. The fleet is moving to Connect alongside
-Twirp; the step-by-step is elephantine's `docs/migration-service.md`, and it
-starts for this service when elephant-api ships the `userconnect` package.
+The two stacks answer the same call differently on the wire, and the
+differences are pinned by the goldens in `testdata/TestDualStackBodies/`:
+
+- JSON field names: Twirp spells them as in the proto (`schema_version`),
+  Connect in protojson's lowerCamelCase (`schemaVersion`). Both accept either
+  spelling in a request.
+- Error body: Twirp `{"code","msg","meta"}`, Connect
+  `{"code","message","details"}` with the meta as an `ErrorMeta` detail.
+- HTTP status for a few codes: `canceled` is 408 on Twirp and 499 on Connect,
+  `deadline_exceeded` 408 and 504, `failed_precondition` 412 and 400.
+- Deadlines: a Connect client's `Connect-Timeout-Ms` becomes the handler's
+  context deadline. The long polls (`PollEventLog`, `PollMessages`,
+  `PollInboxMessages`, `GetActiveConfigGeneration`) answer
+  `deadline_exceeded` when it runs out and `canceled` when the caller goes
+  away (`waitEndedError`). Twirp has no timeout header.
+
+Handlers still return Twirp errors, except scope checks and the long-poll
+ends, which return the protocol-neutral `*connect.Error` from
+`elephantine/rpc`. The Twirp mount translates those on the way out; the
+Connect mount translates the Twirp errors through `rpc.LegacyTwirpErrors()`,
+the innermost interceptor. The remaining migration step is flipping the
+handlers to `connect` errors and dropping that interceptor; the playbook is
+elephantine's `docs/migration-service.md`, the wire details `docs/connect.md`.

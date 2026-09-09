@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"time"
 
+	"connectrpc.com/connect"
 	"github.com/google/uuid"
 	newsdoc_rpc "github.com/ttab/elephant-api/newsdoc"
 	"github.com/ttab/elephant-api/user"
@@ -25,6 +26,18 @@ const (
 	ScopeUser     = "user"
 	ScopeDocAdmin = "doc_admin"
 )
+
+// waitEndedError maps the end of a long-poll wait to the RPC code the
+// caller expects: deadline_exceeded when the deadline they set ran out,
+// canceled when they went away.
+func waitEndedError(ctx context.Context) error {
+	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+		return rpc.Errorf(connect.CodeDeadlineExceeded,
+			"the deadline for the call was exceeded")
+	}
+
+	return rpc.Errorf(connect.CodeCanceled, "context cancelled")
+}
 
 type MessageEvent struct {
 	ID        int64
@@ -652,7 +665,7 @@ func (s *Service) PollEventLog(
 	case <-notifications:
 	case <-time.After(30 * time.Second):
 	case <-ctx.Done():
-		return nil, twirp.NewError(twirp.Canceled, ctx.Err().Error())
+		return nil, waitEndedError(ctx)
 	}
 
 	events, lastID, err = listLogEntries()
@@ -815,7 +828,7 @@ func (s *Service) PollInboxMessages(
 	case <-notifications:
 	case <-time.After(30 * time.Second):
 	case <-ctx.Done():
-		return nil, twirp.NewError(twirp.Canceled, ctx.Err().Error())
+		return nil, waitEndedError(ctx)
 	}
 
 	msgs, err = listMessages()
@@ -912,7 +925,7 @@ func (s *Service) PollMessages(
 	case <-notifications:
 	case <-time.After(30 * time.Second):
 	case <-ctx.Done():
-		return nil, twirp.NewError(twirp.Canceled, ctx.Err().Error())
+		return nil, waitEndedError(ctx)
 	}
 
 	msgs, err = listMessages()

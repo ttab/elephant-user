@@ -226,6 +226,10 @@ func (s *ConfigurationService) GetActiveConfigGeneration(
 	changed, err := s.waitForGenerationChange(
 		ctx, req.KnownId, req.WaitSeconds)
 	if err != nil {
+		if ctx.Err() != nil {
+			return nil, waitEndedError(ctx)
+		}
+
 		return nil, twirp.InternalErrorf(
 			"wait for generation change: %v", err)
 	}
@@ -279,7 +283,7 @@ func (s *ConfigurationService) waitForGenerationChange(
 		case <-time.After(timeout):
 			return false, nil
 		case <-ctx.Done():
-			return false, twirp.Canceled.Error("context cancelled")
+			return false, ctx.Err()
 		}
 	}
 }
