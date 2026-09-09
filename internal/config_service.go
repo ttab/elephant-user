@@ -103,7 +103,8 @@ func (s *ConfigurationService) RegisterConfigGeneration(
 		usage, err := schemaUsageFromRPC(schema.Usage)
 		if err != nil {
 			return nil, rpc.InvalidArgumentf(
-				fmt.Sprintf("schemas.%d.usage", i), "%w", err)
+				fmt.Sprintf("schemas.%d.usage", i),
+				"of %s@%s: %w", schema.Name, schema.Version, err)
 		}
 
 		cs, err := s.resolveConstraintSet(ctx, i, schema)
@@ -164,7 +165,8 @@ func (s *ConfigurationService) resolveConstraintSet(
 		err := dec.Decode(&cs)
 		if err != nil {
 			return cs, rpc.InvalidArgumentf(argument,
-				"is not a valid constraint set: %w", err)
+				"of %s@%s is not a valid constraint set: %w",
+				schema.Name, schema.Version, err)
 		}
 
 		return cs, nil
