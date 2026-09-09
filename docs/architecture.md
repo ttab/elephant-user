@@ -367,10 +367,14 @@ differences are pinned by the goldens in `testdata/TestDualStackBodies/`:
   `deadline_exceeded` when it runs out and `canceled` when the caller goes
   away (`waitEndedError`). Twirp has no timeout header.
 
-Handlers still return Twirp errors, except scope checks and the long-poll
-ends, which return the protocol-neutral `*connect.Error` from
-`elephantine/rpc`. The Twirp mount translates those on the way out; the
-Connect mount translates the Twirp errors through `rpc.LegacyTwirpErrors()`,
-the innermost interceptor. The remaining migration step is flipping the
-handlers to `connect` errors and dropping that interceptor; the playbook is
+Handlers construct every error with the `elephantine/rpc` helpers
+(`rpc.Internalf`, `rpc.InvalidArgument`, `rpc.NotFound`, ...), which return a
+`*connect.Error`. The Twirp mount's interceptor translates them on the way
+out, so a Twirp caller sees the same code, message and `meta` map as before;
+`TestDualStackErrorParity` holds both stacks to that. Every handler error
+carries a code, a failed query or a marshalling failure included, because the
+two stacks default an uncoded error differently (Twirp `internal`, Connect
+`unknown`). Nothing in the handlers imports `twitchtv/twirp`; the Twirp mount
+itself lives in the generated code in elephant-api. The remaining migration
+step is retiring the Twirp mount in the next major release; the playbook is
 elephantine's `docs/migration-service.md`, the wire details `docs/connect.md`.

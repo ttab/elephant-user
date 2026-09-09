@@ -23,6 +23,16 @@ Changes:
   deadline runs out and `canceled` when the caller goes away. Twirp callers
   saw `canceled` for both, and a cancelled `GetActiveConfigGeneration` was
   reported as `internal`. (#78)
+- Handlers construct their errors with the `elephantine/rpc` helpers and the
+  Twirp mount translates them back, so a Twirp caller sees the same code,
+  message and `meta` map as before. That equivalence is tested rather than
+  asserted: the error paths (missing scope, not found, required and invalid
+  argument, validation failure, wrong owner) run over both stacks against one
+  server and are compared code by code and key by key, and golden files pin
+  the raw error bodies of both. Every handler error now carries a code; the
+  stored-payload and marshalling failures that returned a plain Go error, which
+  Twirp reported as `internal`, return `internal` explicitly on both stacks.
+  (#78)
 - `rpc_protocol_responses_total` reports `protocol="connect"` for calls on the
   Connect paths. (#78)
 - Dependency upgrades: elephant-api to v0.25.0, ttab/mage to v0.14.0 (sqlc

@@ -11,7 +11,6 @@ import (
 	"github.com/ttab/elephant-api/user/userconnect"
 	"github.com/ttab/elephantine"
 	"github.com/ttab/elephantine/pg"
-	"github.com/ttab/elephantine/rpc"
 )
 
 type Parameters struct {
@@ -43,11 +42,6 @@ func Run(ctx context.Context, p Parameters) error {
 	if err != nil {
 		return fmt.Errorf("set up service options: %w", err)
 	}
-
-	// The handlers still return Twirp errors. Translate them on the
-	// Connect mount until the handlers move to connect errors; this has
-	// to be the innermost interceptor so the others see RPC codes.
-	opts.Interceptors = append(opts.Interceptors, rpc.LegacyTwirpErrors())
 
 	messagesServer := user.NewMessagesServer(p.Service, opts.ServerOptions())
 	settingsServer := user.NewSettingsServer(p.Service, opts.ServerOptions())

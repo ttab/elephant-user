@@ -19,7 +19,6 @@ import (
 	"github.com/ttab/elephantine/rpc"
 	"github.com/ttab/newsdoc"
 	"github.com/ttab/revisor"
-	"github.com/twitchtv/twirp"
 )
 
 const (
@@ -301,7 +300,7 @@ func (s *Service) GetDocument(
 	targetOwner := auth.Claims.Subject
 	if req.Owner != "" {
 		if !isAllowedOwner(auth, req.Owner) {
-			return nil, twirp.PermissionDenied.Errorf(
+			return nil, rpc.PermissionDeniedf(
 				"not allowed to read documents for %q", req.Owner)
 		}
 
@@ -310,16 +309,16 @@ func (s *Service) GetDocument(
 
 	doc, err := s.store.GetDocument(ctx, targetOwner, req.Application, req.Type, req.Key)
 	if errors.Is(err, ErrDocNotFound) {
-		return nil, twirp.NotFoundError("no such document")
+		return nil, rpc.NotFound("no such document")
 	} else if err != nil {
-		return nil, twirp.InternalErrorf("get document: %w", err)
+		return nil, rpc.Internalf("get document: %w", err)
 	}
 
 	var newsdoc newsdoc_rpc.Document
 
 	err = json.Unmarshal(doc.Payload, &newsdoc)
 	if err != nil {
-		return nil, fmt.Errorf("unmarshal payload: %w", err)
+		return nil, rpc.Internalf("unmarshal payload: %w", err)
 	}
 
 	return &user.GetDocumentResponse{
@@ -356,7 +355,7 @@ func (s *Service) ListDocuments(
 		req.Type, req.IncludePayload,
 	)
 	if err != nil {
-		return nil, twirp.InternalErrorf("list documents: %w", err)
+		return nil, rpc.Internalf("list documents: %w", err)
 	}
 
 	res := make([]*user.Document, len(docs))
@@ -367,7 +366,7 @@ func (s *Service) ListDocuments(
 		if req.IncludePayload && len(d.Payload) > 0 {
 			err = json.Unmarshal(docs[i].Payload, &newsdoc)
 			if err != nil {
-				return nil, fmt.Errorf("unmarshal payload: %w", err)
+				return nil, rpc.Internalf("unmarshal payload: %w", err)
 			}
 		}
 
@@ -405,12 +404,12 @@ func (s *Service) UpdateDocument(
 	if req.Owner != "" {
 		if req.Owner != auth.Claims.Subject {
 			if !auth.Claims.HasScope(ScopeDocAdmin) {
-				return nil, twirp.PermissionDenied.Errorf(
+				return nil, rpc.PermissionDeniedf(
 					"only admins can update documents for other owners")
 			}
 
 			if !isAllowedOwner(auth, req.Owner) {
-				return nil, twirp.PermissionDenied.Errorf(
+				return nil, rpc.PermissionDeniedf(
 					"not allowed to update documents for %q", req.Owner)
 			}
 		}
@@ -419,7 +418,7 @@ func (s *Service) UpdateDocument(
 	}
 
 	if req.Payload == nil {
-		return nil, twirp.RequiredArgumentError("payload")
+		return nil, rpc.RequiredArgument("payload")
 	}
 
 	newsdoc := newsdoc_rpc.DocumentFromRPC(req.Payload)
@@ -430,19 +429,19 @@ func (s *Service) UpdateDocument(
 	validationResult, err := s.validator.ValidateDocument(
 		ctx, postgres.SchemaUsageSettings, &newsdoc)
 	if err != nil {
-		return nil, fmt.Errorf("validate newsdoc payload: %w", err)
+		return nil, rpc.Internalf("validate newsdoc payload: %w", err)
 	}
 
 	if len(validationResult) > 0 {
-		err := twirp.InvalidArgument.Errorf(
+		err := rpc.Errorf(connect.CodeInvalidArgument,
 			"the document had %d validation errors, the first one is: %v",
 			len(validationResult), validationResult[0].String())
 
-		err = err.WithMeta("err_count",
+		err = rpc.WithMeta(err, "err_count",
 			strconv.Itoa(len(validationResult)))
 
 		for i := range validationResult {
-			err = err.WithMeta(strconv.Itoa(i),
+			err = rpc.WithMeta(err, strconv.Itoa(i),
 				validationResult[i].String())
 		}
 
@@ -451,7 +450,7 @@ func (s *Service) UpdateDocument(
 
 	payload, err := json.Marshal(req.Payload)
 	if err != nil {
-		return nil, fmt.Errorf("marshal document payload: %w", err)
+		return nil, rpc.Internalf("marshal document payload: %w", err)
 	}
 
 	err = s.store.UpdateDocument(ctx, DocumentUpdate{
@@ -465,7 +464,7 @@ func (s *Service) UpdateDocument(
 		Payload:       payload,
 	})
 	if err != nil {
-		return nil, twirp.InternalErrorf("update document: %w", err)
+		return nil, rpc.Internalf("update document: %w", err)
 	}
 
 	return &user.UpdateDocumentResponse{}, nil
@@ -484,12 +483,12 @@ func (s *Service) DeleteDocument(
 	if req.Owner != "" {
 		if req.Owner != auth.Claims.Subject {
 			if !auth.Claims.HasScope(ScopeDocAdmin) {
-				return nil, twirp.PermissionDenied.Errorf(
+				return nil, rpc.PermissionDeniedf(
 					"only admins can delete documents for other owners")
 			}
 
 			if !isAllowedOwner(auth, req.Owner) {
-				return nil, twirp.PermissionDenied.Errorf(
+				return nil, rpc.PermissionDeniedf(
 					"not allowed to delete documents for %q", req.Owner)
 			}
 		}
@@ -499,7 +498,7 @@ func (s *Service) DeleteDocument(
 
 	err = s.store.DeleteDocument(ctx, targetOwner, req.Application, req.Type, req.Key)
 	if err != nil {
-		return nil, twirp.InternalErrorf("delete document: %w", err)
+		return nil, rpc.Internalf("delete document: %w", err)
 	}
 
 	return &user.DeleteDocumentResponse{}, nil
@@ -516,7 +515,7 @@ func (s *Service) GetProperties(
 
 	props, err := s.store.GetProperties(ctx, auth.Claims.Subject, req.Application, req.Keys)
 	if err != nil {
-		return nil, twirp.InternalErrorf("get properties: %w", err)
+		return nil, rpc.Internalf("get properties: %w", err)
 	}
 
 	var res user.GetPropertiesResponse
@@ -555,7 +554,7 @@ func (s *Service) SetProperties(
 
 	err = s.store.SetProperties(ctx, auth.Claims.Subject, updates)
 	if err != nil {
-		return nil, twirp.InternalErrorf("set properties: %w", err)
+		return nil, rpc.Internalf("set properties: %w", err)
 	}
 
 	return &user.SetPropertiesResponse{}, nil
@@ -580,7 +579,7 @@ func (s *Service) DeleteProperties(
 
 	err = s.store.DeleteProperties(ctx, auth.Claims.Subject, deletes)
 	if err != nil {
-		return nil, twirp.InternalErrorf("delete properties: %w", err)
+		return nil, rpc.Internalf("delete properties: %w", err)
 	}
 
 	return &user.DeletePropertiesResponse{}, nil
@@ -609,7 +608,7 @@ func (s *Service) PollEventLog(
 	if req.AfterId == -1 {
 		latestID, err := s.store.GetLatestEventLogID(ctx, owners)
 		if err != nil {
-			return nil, twirp.InternalErrorf(
+			return nil, rpc.Internalf(
 				"get latest message id: %w", err)
 		}
 
@@ -651,7 +650,7 @@ func (s *Service) PollEventLog(
 	// If the client is behind, we don't want to wait.
 	events, lastID, err := listLogEntries()
 	if err != nil {
-		return nil, twirp.InternalErrorf("list log entries: %w", err)
+		return nil, rpc.Internalf("list log entries: %w", err)
 	}
 
 	if len(events) > 0 {
@@ -670,7 +669,7 @@ func (s *Service) PollEventLog(
 
 	events, lastID, err = listLogEntries()
 	if err != nil {
-		return nil, twirp.InternalErrorf("list log entries: %w", err)
+		return nil, rpc.Internalf("list log entries: %w", err)
 	}
 
 	return &user.PollEventLogResponse{
@@ -689,7 +688,7 @@ func (s *Service) DeleteInboxMessage(
 	}
 
 	if req.Id < 1 {
-		return nil, twirp.InvalidArgumentError("id",
+		return nil, rpc.InvalidArgument("id",
 			"cannot be less than 1")
 	}
 
@@ -697,7 +696,7 @@ func (s *Service) DeleteInboxMessage(
 		ctx, auth.Claims.Subject, req.Id,
 	)
 	if err != nil {
-		return nil, twirp.InternalErrorf("delete inbox message: %w", err)
+		return nil, rpc.Internalf("delete inbox message: %w", err)
 	}
 
 	return &user.DeleteInboxMessageResponse{}, nil
@@ -721,7 +720,7 @@ func (s *Service) ListInboxMessages(
 		ctx, auth.Claims.Subject, req.BeforeId, size,
 	)
 	if err != nil {
-		return nil, twirp.InternalErrorf(
+		return nil, rpc.Internalf(
 			"list inbox messages: %w", err)
 	}
 
@@ -773,7 +772,7 @@ func (s *Service) PollInboxMessages(
 	if req.AfterId == -1 {
 		latestID, err := s.store.GetLatestInboxMessageID(ctx, auth.Claims.Subject)
 		if err != nil {
-			return nil, twirp.InternalErrorf(
+			return nil, rpc.Internalf(
 				"get latest message id: %w", err)
 		}
 
@@ -813,7 +812,7 @@ func (s *Service) PollInboxMessages(
 	// Check if there are already any messages available.
 	msgs, err := listMessages()
 	if err != nil {
-		return nil, twirp.InternalErrorf(
+		return nil, rpc.Internalf(
 			"list inbox messages: %w", err)
 	}
 
@@ -833,7 +832,7 @@ func (s *Service) PollInboxMessages(
 
 	msgs, err = listMessages()
 	if err != nil {
-		return nil, twirp.InternalErrorf(
+		return nil, rpc.Internalf(
 			"list inbox messages: %w", err)
 	}
 
@@ -869,7 +868,7 @@ func (s *Service) PollMessages(
 	if req.AfterId == -1 {
 		latestID, err := s.store.GetLatestMessageID(ctx, auth.Claims.Subject)
 		if err != nil {
-			return nil, twirp.InternalErrorf(
+			return nil, rpc.Internalf(
 				"get latest message id: %w", err)
 		}
 
@@ -910,7 +909,7 @@ func (s *Service) PollMessages(
 	// Check if there are already any messages available.
 	msgs, err := listMessages()
 	if err != nil {
-		return nil, twirp.InternalErrorf(
+		return nil, rpc.Internalf(
 			"list messages: %w", err)
 	}
 
@@ -930,7 +929,7 @@ func (s *Service) PollMessages(
 
 	msgs, err = listMessages()
 	if err != nil {
-		return nil, twirp.InternalErrorf(
+		return nil, rpc.Internalf(
 			"list messages: %w", err)
 	}
 
@@ -955,11 +954,11 @@ func (s *Service) PushInboxMessage(
 	}
 
 	if req.Recipient == "" {
-		return nil, twirp.RequiredArgumentError("recipient")
+		return nil, rpc.RequiredArgument("recipient")
 	}
 
 	if req.Payload == nil {
-		return nil, twirp.RequiredArgumentError("payload")
+		return nil, rpc.RequiredArgument("payload")
 	}
 
 	newsdoc := newsdoc_rpc.DocumentFromRPC(req.Payload)
@@ -967,19 +966,19 @@ func (s *Service) PushInboxMessage(
 	validationResult, err := s.validator.ValidateDocument(
 		ctx, postgres.SchemaUsageMessages, &newsdoc)
 	if err != nil {
-		return nil, fmt.Errorf("validate newsdoc payload: %w", err)
+		return nil, rpc.Internalf("validate newsdoc payload: %w", err)
 	}
 
 	if len(validationResult) > 0 {
-		err := twirp.InvalidArgument.Errorf(
+		err := rpc.Errorf(connect.CodeInvalidArgument,
 			"the document had %d validation errors, the first one is: %v",
 			len(validationResult), validationResult[0].String())
 
-		err = err.WithMeta("err_count",
+		err = rpc.WithMeta(err, "err_count",
 			strconv.Itoa(len(validationResult)))
 
 		for i := range validationResult {
-			err = err.WithMeta(strconv.Itoa(i),
+			err = rpc.WithMeta(err, strconv.Itoa(i),
 				validationResult[i].String())
 		}
 
@@ -997,7 +996,7 @@ func (s *Service) PushInboxMessage(
 		Payload:   req.Payload,
 	})
 	if err != nil {
-		return nil, twirp.InternalErrorf(
+		return nil, rpc.Internalf(
 			"failed to push inbox message: %w", err)
 	}
 
@@ -1014,11 +1013,11 @@ func (s *Service) PushMessage(
 	}
 
 	if req.Recipient == "" {
-		return nil, twirp.RequiredArgumentError("recipient")
+		return nil, rpc.RequiredArgument("recipient")
 	}
 
 	if req.Payload == nil {
-		return nil, twirp.RequiredArgumentError("payload")
+		return nil, rpc.RequiredArgument("payload")
 	}
 
 	var docUUID *uuid.UUID
@@ -1026,7 +1025,7 @@ func (s *Service) PushMessage(
 	if req.DocUuid != "" {
 		parsed, err := uuid.Parse(req.DocUuid)
 		if err != nil {
-			return nil, twirp.InvalidArgumentError(
+			return nil, rpc.InvalidArgument(
 				"doc_uuid", err.Error())
 		}
 
@@ -1043,7 +1042,7 @@ func (s *Service) PushMessage(
 		Payload:   req.Payload,
 	})
 	if err != nil {
-		return nil, twirp.InternalErrorf(
+		return nil, rpc.Internalf(
 			"failed to push inbox message: %w", err)
 	}
 
@@ -1060,7 +1059,7 @@ func (s *Service) UpdateInboxMessage(
 	}
 
 	if req.Id < 1 {
-		return nil, twirp.InvalidArgumentError("id",
+		return nil, rpc.InvalidArgument("id",
 			"cannot be less than 1")
 	}
 
@@ -1068,7 +1067,7 @@ func (s *Service) UpdateInboxMessage(
 		ctx, auth.Claims.Subject, req.Id, req.IsRead,
 	)
 	if err != nil {
-		return nil, twirp.InternalErrorf("update inbox message: %w", err)
+		return nil, rpc.Internalf("update inbox message: %w", err)
 	}
 
 	return &user.UpdateInboxMessageResponse{}, nil

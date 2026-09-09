@@ -435,6 +435,6 @@ unauthenticated and internal only.
   off in production.
 - **No idempotency on pushes.** A retried `PushInboxMessage` duplicates.
   Planned with the inbox redesign.
-- **Handlers still return Twirp errors.** Connect callers get them translated
-  by an interceptor; the error flip to `connect` errors, the last migration
-  step, is pending. Nothing a caller can observe changes when it lands.
+- **Twirp is still served.** The `/twirp/` mount goes in the next major
+  release, once `rpc_protocol_responses_total{protocol="twirp"}` is zero for
+  every method and the remaining `client_id`s have been told.

@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -15,6 +16,7 @@ import (
 	"github.com/ttab/elephant-api/newsdoc"
 	"github.com/ttab/elephant-api/user"
 	"github.com/ttab/elephantine"
+	"github.com/ttab/elephantine/rpc"
 	"github.com/ttab/elephantine/test"
 )
 
@@ -150,6 +152,23 @@ func TestDualStackBodies(t *testing.T) {
 
 	test.AgainstGolden(t, regenerate, connectErr,
 		filepath.Join(dataDir, "not-found-connect.json"))
+
+	// An error with metadata: Twirp carries it as "meta", Connect as an
+	// ErrorMeta detail.
+	noPayloadBody := `{"application":"` + docApp + `","type":"` + docType +
+		`","key":"current","schemaVersion":"v1.0.0"}`
+
+	twirpMeta := eu.postJSON(t, token,
+		twirpPrefix+settingsPath+"UpdateDocument", noPayloadBody, nil)
+
+	test.AgainstGolden(t, regenerate, twirpMeta,
+		filepath.Join(dataDir, "required-argument-twirp.json"))
+
+	connectMeta := eu.postJSON(t, token,
+		settingsPath+"UpdateDocument", noPayloadBody, nil)
+
+	test.AgainstGolden(t, regenerate, connectMeta,
+		filepath.Join(dataDir, "required-argument-connect.json"))
 }
 
 // TestDualStackErrorParity runs the error paths over both stacks against
@@ -206,6 +225,56 @@ func TestDualStackErrorParity(t *testing.T) {
 		_, connectErr := connectClients.Settings.GetDocument(userCtx, req)
 
 		check(t, connect.CodeNotFound, twirpErr, connectErr)
+	})
+
+	t.Run("required argument", func(t *testing.T) {
+		req := &user.UpdateDocumentRequest{
+			Application:   "se.ecms.local.test.parity",
+			Type:          "core/view-setting",
+			Key:           "current",
+			SchemaVersion: "v1.0.0",
+		}
+
+		_, twirpErr := twirpClients.Settings.UpdateDocument(userCtx, req)
+		_, connectErr := connectClients.Settings.UpdateDocument(userCtx, req)
+
+		check(t, connect.CodeInvalidArgument, twirpErr, connectErr)
+
+		test.Equalf(t, "payload", rpc.Meta(connectErr)["argument"],
+			"name the missing argument in the metadata")
+	})
+
+	t.Run("validation errors", func(t *testing.T) {
+		req := &user.UpdateDocumentRequest{
+			Application:   "se.ecms.local.test.parity",
+			Type:          "core/view-setting",
+			Key:           "current",
+			SchemaVersion: "v1.0.0",
+			Payload: &newsdoc.Document{
+				Type:  "core/view-setting",
+				Title: "Invalid",
+				Meta: []*newsdoc.Block{
+					{Type: "test/not-a-declared-block"},
+				},
+			},
+		}
+
+		_, twirpErr := twirpClients.Settings.UpdateDocument(userCtx, req)
+		_, connectErr := connectClients.Settings.UpdateDocument(userCtx, req)
+
+		check(t, connect.CodeInvalidArgument, twirpErr, connectErr)
+
+		// The individual errors are numbered from zero, and err_count
+		// says how many of them there are.
+		meta := rpc.Meta(connectErr)
+
+		count, err := strconv.Atoi(meta["err_count"])
+		test.Mustf(t, err, "read the err_count metadata")
+
+		for i := range count {
+			test.Equalf(t, false, meta[strconv.Itoa(i)] == "",
+				"describe validation error %d", i)
+		}
 	})
 
 	t.Run("wrong owner", func(t *testing.T) {

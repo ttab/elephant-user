@@ -175,10 +175,10 @@ asked for it to stay out of production. Removing it also removes
 `internal/migrate.go`. Embedding the migrations stays, because the tests and
 the platform tooling read them.
 
-**Connect error flip.** Both stacks are served, but the handlers still
-return Twirp errors that the Connect mount translates. The last step of
-elephantine's `docs/migration-service.md` is to return `connect` errors from
-the handlers and drop `rpc.LegacyTwirpErrors()`. Not observable by callers.
+**Retire Twirp.** Both stacks are served and the handlers speak the `rpc`
+error vocabulary. Step 3 of elephantine's `docs/migration-service.md`, dropping
+the `/twirp/` mount, waits for the next major release and for
+`rpc_protocol_responses_total{protocol="twirp"}` to reach zero.
 
 **Inbox to orgs and units.** Messages are stored and delivered per recipient
 `sub`; a message addressed to a unit or org is stored and reaches nobody. The
