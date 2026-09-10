@@ -44,7 +44,7 @@ func (teu *TestElephantUser) postJSON(
 
 	req, err := http.NewRequestWithContext(t.Context(),
 		http.MethodPost, teu.BaseURL+path, strings.NewReader(body))
-	test.Mustf(t, err, "create the request")
+	test.Mustf(t, err, "create the request to %s", path)
 
 	req.Header.Set("Content-Type", jsonMediaType)
 	req.Header.Set("Authorization", "Bearer "+token)
@@ -52,19 +52,20 @@ func (teu *TestElephantUser) postJSON(
 	maps.Copy(req.Header, headers)
 
 	res, err := teu.Client.Do(req)
-	test.Mustf(t, err, "perform the request")
+	test.Mustf(t, err, "perform the request to %s", path)
 
 	defer func() {
 		_ = res.Body.Close()
 	}()
 
 	data, err := io.ReadAll(res.Body)
-	test.Mustf(t, err, "read the response body")
+	test.Mustf(t, err, "read the response body from %s", path)
 
 	out := rpcResponse{Status: res.StatusCode}
 
 	err = json.Unmarshal(data, &out.Body)
-	test.Mustf(t, err, "unmarshal the response body %q", string(data))
+	test.Mustf(t, err, "unmarshal the response body from %s: %q",
+		path, string(data))
 
 	return out
 }
@@ -191,8 +192,14 @@ func TestDualStackErrorParity(t *testing.T) {
 	check := func(t *testing.T, code connect.Code, twirpErr, connectErr error) {
 		t.Helper()
 
-		test.IsRPCError(t, twirpErr, code)
-		test.IsRPCError(t, connectErr, code)
+		if !rpc.IsCode(twirpErr, code) {
+			t.Fatalf("expected a %q error over Twirp, got %v", code, twirpErr)
+		}
+
+		if !rpc.IsCode(connectErr, code) {
+			t.Fatalf("expected a %q error over Connect, got %v", code, connectErr)
+		}
+
 		test.ErrorParity(t, twirpErr, connectErr)
 	}
 
