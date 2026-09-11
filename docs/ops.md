@@ -70,12 +70,14 @@ serve every RPC: an active config generation.
 
 | Port | Default | What is on it |
 |---|---|---|
-| API | `:1080` (`ADDR`) | `POST /twirp/elephant.user.{Settings,Messages,Configuration}/<Method>`, `GET /health/alive`, `GET /version` |
+| API | `:1080` (`ADDR`) | `POST /twirp/elephant.user.{Settings,Messages,Configuration}/<Method>` (Twirp), `POST /elephant.user.{Settings,Messages,Configuration}/<Method>` (Connect, also gRPC), `GET /health/alive`, `GET /version` |
 | API, TLS | `:1443` (`TLS_ADDR`), only when `TLS_CERT_PATH` is set | the same, over TLS |
 | Profile | `:1081` (`PROFILE_ADDR`) | `GET /health/ready`, `GET /metrics`, `/debug/pprof/*`, `/debug/vars`, `/debug/bom` |
 
-The plain listener speaks HTTP/1.1 and HTTP/2. The profile port is internal
-and unauthenticated; it must not be exposed.
+The plain listener speaks HTTP/1.1 and HTTP/2. An ingress in front of the
+service has to route both the `/twirp/` prefix and the bare
+`/elephant.user.` prefix, or Connect callers get the ingress's 404. The
+profile port is internal and unauthenticated; it must not be exposed.
 
 ## Data flows
 
@@ -433,5 +435,6 @@ unauthenticated and internal only.
   off in production.
 - **No idempotency on pushes.** A retried `PushInboxMessage` duplicates.
   Planned with the inbox redesign.
-- **Connect is not mounted yet.** Only `/twirp/` paths exist; the dual-stack
-  mount waits for elephant-api to ship the `userconnect` package.
+- **Twirp is still served.** The `/twirp/` mount goes in the next major
+  release, once `rpc_protocol_responses_total{protocol="twirp"}` is zero for
+  every method and the remaining `client_id`s have been told.

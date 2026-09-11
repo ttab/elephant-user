@@ -7,7 +7,7 @@ validated newsdoc payloads keyed by owner, application, type and key),
 **properties** (flat key-value preferences), **inbox messages** (durable
 newsdoc documents with a read flag) and **system messages** (ephemeral
 notifications such as error toasts). Everything lives in Postgres and is served
-over Twirp.
+over Twirp and Connect.
 
 Two things make it more than a CRUD service. Settings documents can be owned by
 an organisation or a unit as well as a user, so a filter set can be shared
@@ -39,8 +39,8 @@ and `#anchor` resolves. The lint workflow runs it.
 ```
 cmd/user/                  the service binary: flags, pools, wiring
 internal/
-  service.go               Settings and Messages Twirp handlers, access control
-  config_service.go        Configuration Twirp handlers
+  service.go               Settings and Messages handlers, access control
+  config_service.go        Configuration handlers
   config.go                config feature contract: types, events, errors
   store.go                 PGStore: messages, settings, eventlog, subscriber, cleaner
   config_store.go          PGStore: config generations, schemas, deprecations
@@ -126,7 +126,7 @@ the second column.
 
 | Flag | Env | Default | What it does |
 |---|---|---|---|
-| `--addr` | `ADDR` | `:1080` | Plain HTTP listener: the Twirp APIs, `/health/alive`, `/version`. Serves HTTP/1.1 and HTTP/2. |
+| `--addr` | `ADDR` | `:1080` | Plain HTTP listener: the Twirp (`/twirp/`) and Connect (`/elephant.user.*`) APIs, `/health/alive`, `/version`. Serves HTTP/1.1 and HTTP/2. |
 | `--profile-addr` | `PROFILE_ADDR` | `:1081` | Internal listener: `/health/ready` (all checks optional: the body reports `postgres` and `schemas`, the status stays 200 while the process is up), `/metrics`, `/debug/pprof`, `/debug/bom`. Unauthenticated; never expose it. |
 | `--tls-addr` | `TLS_ADDR`, `TLS_LISTEN_ADDR` | `:1443` | HTTPS listener, only opened when `--cert-file` is set. |
 | `--cert-file` | `TLS_CERT_PATH` | | PEM certificate. Setting it is the switch for the TLS listener. |
@@ -175,11 +175,10 @@ asked for it to stay out of production. Removing it also removes
 `internal/migrate.go`. Embedding the migrations stays, because the tests and
 the platform tooling read them.
 
-**Connect dual-stack.** The fleet is moving from Twirp to Connect and this
-service already carries the shared infrastructure (authentication middleware,
-shared RPC metrics, the Twirp error translator). Mounting the Connect handlers
-next to the Twirp ones waits for elephant-api to ship the `userconnect`
-package; the playbook is elephantine's `docs/migration-service.md`.
+**Retire Twirp.** Both stacks are served and the handlers speak the `rpc`
+error vocabulary. Step 3 of elephantine's `docs/migration-service.md`, dropping
+the `/twirp/` mount, waits for the next major release and for
+`rpc_protocol_responses_total{protocol="twirp"}` to reach zero.
 
 **Inbox to orgs and units.** Messages are stored and delivered per recipient
 `sub`; a message addressed to a unit or org is stored and reaches nobody. The

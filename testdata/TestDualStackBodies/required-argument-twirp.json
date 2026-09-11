@@ -1,0 +1,10 @@
+{
+  "body": {
+    "code": "invalid_argument",
+    "meta": {
+      "argument": "payload"
+    },
+    "msg": "payload is required"
+  },
+  "status": 400
+}

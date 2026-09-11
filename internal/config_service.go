@@ -9,11 +9,11 @@ import (
 	"log/slog"
 	"time"
 
+	"connectrpc.com/connect"
 	"github.com/ttab/elephant-api/user"
 	"github.com/ttab/elephant-user/postgres"
 	"github.com/ttab/elephantine/rpc"
 	"github.com/ttab/revisor"
-	"github.com/twitchtv/twirp"
 )
 
 const (
@@ -72,7 +72,7 @@ func (s *ConfigurationService) RegisterConfigGeneration(
 	}
 
 	if len(req.Schemas) == 0 {
-		return nil, twirp.RequiredArgumentError("schemas")
+		return nil, rpc.RequiredArgument("schemas")
 	}
 
 	schemas := make([]ConfigSchema, len(req.Schemas))
@@ -83,31 +83,31 @@ func (s *ConfigurationService) RegisterConfigGeneration(
 
 	for i, schema := range req.Schemas {
 		if schema.Name == "" {
-			return nil, twirp.RequiredArgumentError(
+			return nil, rpc.RequiredArgument(
 				fmt.Sprintf("schemas.%d.name", i))
 		}
 
 		if schema.Version == "" {
-			return nil, twirp.RequiredArgumentError(
+			return nil, rpc.RequiredArgument(
 				fmt.Sprintf("schemas.%d.version", i))
 		}
 
 		if seen[schema.Name] {
-			return nil, twirp.InvalidArgument.Errorf(
-				"schemas.%d.name: %q listed twice",
-				i, schema.Name)
+			return nil, rpc.InvalidArgumentf(
+				fmt.Sprintf("schemas.%d.name", i),
+				"%q is listed twice", schema.Name)
 		}
 
 		seen[schema.Name] = true
 
 		usage, err := schemaUsageFromRPC(schema.Usage)
 		if err != nil {
-			return nil, twirp.InvalidArgument.Errorf(
-				"schema %s@%s: %v",
-				schema.Name, schema.Version, err)
+			return nil, rpc.InvalidArgumentf(
+				fmt.Sprintf("schemas.%d.usage", i),
+				"of %s@%s: %w", schema.Name, schema.Version, err)
 		}
 
-		cs, err := s.resolveConstraintSet(ctx, schema)
+		cs, err := s.resolveConstraintSet(ctx, i, schema)
 		if err != nil {
 			return nil, err
 		}
@@ -128,8 +128,8 @@ func (s *ConfigurationService) RegisterConfigGeneration(
 	for usage, sets := range grouped {
 		_, err := revisor.NewValidator(sets...)
 		if err != nil {
-			return nil, twirp.InvalidArgument.Errorf(
-				"the schemas for usage %q cannot form a valid constraint set: %v",
+			return nil, rpc.Errorf(connect.CodeInvalidArgument,
+				"the schemas for usage %q cannot form a valid constraint set: %w",
 				usage, err)
 		}
 	}
@@ -137,9 +137,9 @@ func (s *ConfigurationService) RegisterConfigGeneration(
 	gen, err := s.store.RegisterConfigGeneration(
 		ctx, req.Description, schemas, req.Activate)
 	if errors.Is(err, ErrSchemaMismatch) || errors.Is(err, ErrSchemaSpecMissing) {
-		return nil, twirp.InvalidArgument.Error(err.Error())
+		return nil, rpc.Errorf(connect.CodeInvalidArgument, "%w", err)
 	} else if err != nil {
-		return nil, twirp.InternalErrorf("register generation: %v", err)
+		return nil, rpc.Internalf("register generation: %w", err)
 	}
 
 	return &user.RegisterConfigGenerationResponse{
@@ -148,11 +148,14 @@ func (s *ConfigurationService) RegisterConfigGeneration(
 }
 
 // resolveConstraintSet decodes the supplied schema spec, or loads the
-// stored spec when none is supplied.
+// stored spec when none is supplied. The index names the request field
+// in argument errors.
 func (s *ConfigurationService) resolveConstraintSet(
-	ctx context.Context, schema *user.ConfigGenerationSchema,
+	ctx context.Context, i int, schema *user.ConfigGenerationSchema,
 ) (revisor.ConstraintSet, error) {
 	var cs revisor.ConstraintSet
+
+	argument := fmt.Sprintf("schemas.%d.spec", i)
 
 	if schema.Spec != "" {
 		dec := json.NewDecoder(bytes.NewReader([]byte(schema.Spec)))
@@ -161,8 +164,8 @@ func (s *ConfigurationService) resolveConstraintSet(
 
 		err := dec.Decode(&cs)
 		if err != nil {
-			return cs, twirp.InvalidArgument.Errorf(
-				"invalid spec for schema %s@%s: %v",
+			return cs, rpc.InvalidArgumentf(argument,
+				"of %s@%s is not a valid constraint set: %w",
 				schema.Name, schema.Version, err)
 		}
 
@@ -171,17 +174,17 @@ func (s *ConfigurationService) resolveConstraintSet(
 
 	stored, err := s.store.GetSchema(ctx, schema.Name, schema.Version)
 	if errors.Is(err, ErrSchemaNotFound) {
-		return cs, twirp.InvalidArgument.Errorf(
-			"schema %s@%s is not stored and no spec was supplied",
+		return cs, rpc.InvalidArgumentf(argument,
+			"is required, %s@%s is not stored",
 			schema.Name, schema.Version)
 	} else if err != nil {
-		return cs, twirp.InternalErrorf("get stored schema: %v", err)
+		return cs, rpc.Internalf("get stored schema: %w", err)
 	}
 
 	err = json.Unmarshal(stored.Spec, &cs)
 	if err != nil {
-		return cs, twirp.InternalErrorf(
-			"decode stored schema %s@%s: %v",
+		return cs, rpc.Internalf(
+			"decode stored schema %s@%s: %w",
 			schema.Name, schema.Version, err)
 	}
 
@@ -198,14 +201,14 @@ func (s *ConfigurationService) ActivateConfigGeneration(
 	}
 
 	if req.Id < 1 {
-		return nil, twirp.RequiredArgumentError("id")
+		return nil, rpc.RequiredArgument("id")
 	}
 
 	gen, err := s.store.ActivateConfigGeneration(ctx, req.Id)
 	if errors.Is(err, ErrGenerationNotFound) {
-		return nil, twirp.NotFoundError("no such generation")
+		return nil, rpc.NotFound("no such generation")
 	} else if err != nil {
-		return nil, twirp.InternalErrorf("activate generation: %v", err)
+		return nil, rpc.Internalf("activate generation: %w", err)
 	}
 
 	return &user.ActivateConfigGenerationResponse{
@@ -226,8 +229,12 @@ func (s *ConfigurationService) GetActiveConfigGeneration(
 	changed, err := s.waitForGenerationChange(
 		ctx, req.KnownId, req.WaitSeconds)
 	if err != nil {
-		return nil, twirp.InternalErrorf(
-			"wait for generation change: %v", err)
+		if ctx.Err() != nil {
+			return nil, waitEndedError(ctx)
+		}
+
+		return nil, rpc.Internalf(
+			"wait for generation change: %w", err)
 	}
 
 	if !changed && req.OnlyChanged {
@@ -238,7 +245,7 @@ func (s *ConfigurationService) GetActiveConfigGeneration(
 
 	gen, err := s.store.GetActiveConfigGeneration(ctx)
 	if err != nil {
-		return nil, twirp.InternalErrorf("get active generation: %v", err)
+		return nil, rpc.Internalf("get active generation: %w", err)
 	}
 
 	if gen == nil {
@@ -279,7 +286,7 @@ func (s *ConfigurationService) waitForGenerationChange(
 		case <-time.After(timeout):
 			return false, nil
 		case <-ctx.Done():
-			return false, twirp.Canceled.Error("context cancelled")
+			return false, ctx.Err()
 		}
 	}
 }
@@ -306,7 +313,7 @@ func (s *ConfigurationService) ListConfigGenerations(
 
 	generations, err := s.store.ListConfigGenerations(ctx, req.Before, pageSize)
 	if err != nil {
-		return nil, twirp.InternalErrorf("list generations: %v", err)
+		return nil, rpc.Internalf("list generations: %w", err)
 	}
 
 	res := user.ListConfigGenerationsResponse{
@@ -331,14 +338,14 @@ func (s *ConfigurationService) GetSchema(
 	}
 
 	if req.Name == "" {
-		return nil, twirp.RequiredArgumentError("name")
+		return nil, rpc.RequiredArgument("name")
 	}
 
 	schema, err := s.store.GetSchema(ctx, req.Name, req.Version)
 	if errors.Is(err, ErrSchemaNotFound) {
-		return nil, twirp.NotFoundError("no such schema")
+		return nil, rpc.NotFound("no such schema")
 	} else if err != nil {
-		return nil, twirp.InternalErrorf("get schema: %v", err)
+		return nil, rpc.Internalf("get schema: %w", err)
 	}
 
 	return &user.GetSchemaResponse{
@@ -360,7 +367,7 @@ func (s *ConfigurationService) GetDeprecations(
 
 	deprecations, err := s.store.GetDeprecations(ctx)
 	if err != nil {
-		return nil, twirp.InternalErrorf("list deprecations: %v", err)
+		return nil, rpc.Internalf("list deprecations: %w", err)
 	}
 
 	res := user.GetDeprecationsResponse{
@@ -387,11 +394,11 @@ func (s *ConfigurationService) UpdateDeprecation(
 	}
 
 	if req.Deprecation == nil {
-		return nil, twirp.RequiredArgumentError("deprecation")
+		return nil, rpc.RequiredArgument("deprecation")
 	}
 
 	if req.Deprecation.Label == "" {
-		return nil, twirp.RequiredArgumentError("deprecation.label")
+		return nil, rpc.RequiredArgument("deprecation.label")
 	}
 
 	err = s.store.UpdateDeprecation(ctx, Deprecation{
@@ -399,7 +406,7 @@ func (s *ConfigurationService) UpdateDeprecation(
 		Enforced: req.Deprecation.Enforced,
 	})
 	if err != nil {
-		return nil, twirp.InternalErrorf("update deprecation: %v", err)
+		return nil, rpc.Internalf("update deprecation: %w", err)
 	}
 
 	return &user.UpdateDeprecationResponse{}, nil

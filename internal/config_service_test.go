@@ -1,7 +1,6 @@
 package internal_test
 
 import (
-	"net/http"
 	"os"
 	"path/filepath"
 	"sync"
@@ -15,7 +14,6 @@ import (
 	"github.com/ttab/elephant-api/user"
 	"github.com/ttab/elephantine"
 	"github.com/ttab/elephantine/test"
-	"github.com/twitchtv/twirp"
 )
 
 const extraSettingsSpec = `{
@@ -88,15 +86,9 @@ func TestConfiguration(t *testing.T) {
 		},
 	})
 
-	adminCtx, _ := twirp.WithHTTPRequestHeaders(ctx, http.Header{
-		"Authorization": []string{"Bearer " + adminToken},
-	})
-	readCtx, _ := twirp.WithHTTPRequestHeaders(ctx, http.Header{
-		"Authorization": []string{"Bearer " + readToken},
-	})
-	userCtx, _ := twirp.WithHTTPRequestHeaders(ctx, http.Header{
-		"Authorization": []string{"Bearer " + userToken},
-	})
+	adminCtx := bearerContext(ctx, adminToken)
+	readCtx := bearerContext(ctx, readToken)
+	userCtx := bearerContext(ctx, userToken)
 
 	// The seeded generation with the embedded schemas should be active.
 	active1, err := eu.Configuration.GetActiveConfigGeneration(readCtx,

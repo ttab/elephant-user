@@ -8,6 +8,7 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/ttab/elephant-api/user"
+	"github.com/ttab/elephant-api/user/userconnect"
 	"github.com/ttab/elephantine"
 	"github.com/ttab/elephantine/pg"
 )
@@ -50,6 +51,20 @@ func Run(ctx context.Context, p Parameters) error {
 	p.APIServer.RegisterAPI(messagesServer, opts)
 	p.APIServer.RegisterAPI(settingsServer, opts)
 	p.APIServer.RegisterAPI(configurationServer, opts)
+
+	// The same services on the Connect paths (/elephant.user.<Service>/).
+	handlerOpts := opts.HandlerOptions()
+
+	messagesPath, messagesHandler := userconnect.NewMessagesServiceHandler(
+		p.Service, handlerOpts...)
+	settingsPath, settingsHandler := userconnect.NewSettingsServiceHandler(
+		p.Service, handlerOpts...)
+	configurationPath, configurationHandler := userconnect.NewConfigurationServiceHandler(
+		p.ConfigurationService, handlerOpts...)
+
+	p.APIServer.RegisterConnect(messagesPath, messagesHandler, opts)
+	p.APIServer.RegisterConnect(settingsPath, settingsHandler, opts)
+	p.APIServer.RegisterConnect(configurationPath, configurationHandler, opts)
 
 	grp := elephantine.NewErrGroup(ctx, p.Logger,
 		elephantine.WithErrGroupMetricsRegisterer(p.Registerer))

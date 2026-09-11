@@ -61,8 +61,8 @@ customer and does not label by org).
 - `rpc_protocol_responses_total{service,method,protocol,code,client_id}` —
   the same responses broken down by RPC code and by the calling application
   (the token's client id, empty for anonymous or refused calls). `protocol`
-  is `twirp` for every call today; when Connect is mounted, `protocol="twirp"`
-  going to zero for a method is what says its Twirp mount can be retired.
+  is `twirp` or `connect`; `protocol="twirp"` going to zero for a method is
+  what says its Twirp mount can be retired.
   `code` is where to look for the error breakdown `status` cannot give.
 
 ## Database

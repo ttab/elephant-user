@@ -4,6 +4,47 @@ All notable changes to elephant-user from v1.0.0 onwards are documented here.
 Entries are derived from the release tags; the linked pull requests hold the
 detail. Earlier history is not reconstructed.
 
+## [v1.5.0] - Unreleased
+
+**New API surface (Connect):** every RPC is also served on the Connect path
+`POST /elephant.user.<Service>/<Method>`, as protobuf, JSON or gRPC, next to
+the unchanged `/twirp/` paths. An ingress in front of the service must route
+the new prefix. The Connect JSON spells field names in lowerCamelCase
+(`schemaVersion`) where Twirp uses the proto names (`schema_version`); error
+bodies are `{code, message, details}`; and `canceled`, `deadline_exceeded` and
+`failed_precondition` map to 499, 504 and 400 instead of Twirp's 408, 408 and
+412. A `Connect-Timeout-Ms` header becomes the handler's deadline. Go callers
+use the `userconnect` clients from elephant-api v0.25.0. (#78)
+
+Changes:
+
+- The long polls (`PollEventLog`, `PollMessages`, `PollInboxMessages`,
+  `GetActiveConfigGeneration`) answer `deadline_exceeded` when the caller's
+  deadline runs out and `canceled` when the caller goes away. Twirp callers
+  saw `canceled` for both, and a cancelled `GetActiveConfigGeneration` was
+  reported as `internal`. (#78)
+- Handlers construct their errors with the `elephantine/rpc` helpers and the
+  Twirp mount translates them back, so a Twirp caller sees the same code,
+  message and `meta` map as before. That equivalence is tested rather than
+  asserted: the error paths (missing scope, not found, required and invalid
+  argument, validation failure, wrong owner) run over both stacks against one
+  server and are compared code by code and key by key, and golden files pin
+  the raw error bodies of both. Every handler error now carries a code; the
+  stored-payload and marshalling failures that returned a plain Go error, which
+  Twirp reported as `internal`, return `internal` explicitly on both stacks.
+  (#78)
+- `RegisterConfigGeneration` names the offending request field in the
+  `argument` error metadata for a duplicate name, an unknown usage, an
+  undecodable spec and a missing spec for an unstored schema
+  (`schemas.<i>.name`, `.usage`, `.spec`), the way its required-field errors
+  already did. The message text of those four errors starts with the field
+  path. (#78)
+- `rpc_protocol_responses_total` reports `protocol="connect"` for calls on the
+  Connect paths. (#78)
+- Dependency upgrades: elephant-api to v0.25.0, ttab/mage to v0.14.0 (sqlc
+  1.31.1), eltest to v0.4.2, revisor to v1.0.3, connect to v1.21.0, pgx to
+  v5.11.0. (#78)
+
 ## [v1.4.0] - 2026-09-08
 
 **Behaviour change (authentication):** a request with an invalid or missing

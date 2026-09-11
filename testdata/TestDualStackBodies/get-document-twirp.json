@@ -1,0 +1,19 @@
+{
+  "body": {
+    "document": {
+      "application": "se.ecms.local.test.bodies",
+      "key": "current",
+      "owner": "core://user/tester",
+      "payload": {
+        "title": "Dual stack",
+        "type": "core/view-setting"
+      },
+      "schema_version": "v1.0.0",
+      "title": "Dual stack",
+      "type": "core/view-setting",
+      "updated_by": "core://user/tester",
+      "version": "1"
+    }
+  },
+  "status": 200
+}
