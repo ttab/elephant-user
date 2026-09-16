@@ -4,7 +4,7 @@ All notable changes to elephant-user from v1.0.0 onwards are documented here.
 Entries are derived from the release tags; the linked pull requests hold the
 detail. Earlier history is not reconstructed.
 
-## [v1.5.0] - Unreleased
+## [v1.5.0] - 2026-09-16
 
 **New API surface (Connect):** every RPC is also served on the Connect path
 `POST /elephant.user.<Service>/<Method>`, as protobuf, JSON or gRPC, next to
