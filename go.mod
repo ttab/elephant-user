@@ -12,7 +12,7 @@ require (
 	github.com/prometheus/client_golang v1.24.1
 	github.com/ttab/elephant-api v0.25.0
 	github.com/ttab/elephantine v0.29.1
-	github.com/ttab/eltest v0.4.2
+	github.com/ttab/eltest v0.4.3
 	github.com/ttab/mage v0.14.0
 	github.com/ttab/newsdoc v1.1.0
 	github.com/ttab/revisor v1.0.3
