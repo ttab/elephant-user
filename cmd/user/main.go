@@ -16,7 +16,6 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/ttab/elephant-user/internal"
 	"github.com/ttab/elephant-user/postgres"
-	"github.com/ttab/elephant-user/schema"
 	"github.com/ttab/elephantine"
 	"github.com/ttab/elephantine/pg"
 	"github.com/urfave/cli/v3"
@@ -38,7 +37,7 @@ const defaultDBMaxConns = 16
 
 // listenPoolMaxConns is the size of the direct pool when queries go through a
 // bouncer: it then carries only the LISTEN session, which the subscriber
-// hijacks out of the pool, and the startup migration.
+// hijacks out of the pool, plus one spare.
 const listenPoolMaxConns = 2
 
 func main() {
@@ -113,13 +112,6 @@ removed. Runs on one replica at a time under a job lock.`,
 				Sources: cli.EnvVars("CLEANUP_INTERVAL"),
 				Value:   12 * time.Hour,
 			},
-			&cli.BoolFlag{
-				Name: "migrate-db",
-				Usage: `Perform database migrations.
-Intended for bootstrapping disposable environments. Having this always on in
-production is a BAD IDEA! Migrations can be expensive and need to be planned.`,
-				Sources: cli.EnvVars("MIGRATE_DB"),
-			},
 		},
 	}
 
@@ -151,7 +143,6 @@ func runUser(ctx context.Context, cmd *cli.Command) error {
 		connString        = cmd.String("db")
 		bouncerConnString = cmd.String("db-bouncer")
 		corsHosts         = cmd.StringSlice("cors-host")
-		migrateDB         = cmd.Bool("migrate-db")
 		cleanupInterval   = cmd.Duration("cleanup-interval")
 		dbMaxConns        = cmd.Int("db-max-conns")
 	)
@@ -220,17 +211,6 @@ func runUser(ctx context.Context, cmd *cli.Command) error {
 			pg.NewPoolStatCollector(pool, name))
 		if err != nil {
 			return fmt.Errorf("register %s pool metrics: %w", name, err)
-		}
-	}
-
-	if migrateDB {
-		logger.Info("migrating database schema")
-
-		// Migrate using the direct connection, tern doesn't play
-		// well with transaction pooling.
-		err = internal.Migrate(ctx, pubsubPool, schema.Migrations)
-		if err != nil {
-			return fmt.Errorf("migrate database: %w", err)
 		}
 	}
 

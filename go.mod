@@ -7,13 +7,12 @@ require (
 	github.com/golang-jwt/jwt/v5 v5.3.1
 	github.com/google/uuid v1.6.0
 	github.com/jackc/pgx/v5 v5.11.0
-	github.com/jackc/tern/v2 v2.4.3
 	github.com/joho/godotenv v1.5.1
 	github.com/prometheus/client_golang v1.24.1
-	github.com/ttab/elephant-api v0.25.0
+	github.com/ttab/elephant-api v0.25.2
 	github.com/ttab/elephantine v0.29.1
 	github.com/ttab/eltest v0.4.2
-	github.com/ttab/mage v0.14.0
+	github.com/ttab/mage v0.15.0
 	github.com/ttab/newsdoc v1.1.0
 	github.com/ttab/revisor v1.0.3
 	github.com/twitchtv/twirp v8.1.3+incompatible
@@ -65,6 +64,7 @@ require (
 	github.com/jackc/pgpassfile v1.0.0 // indirect
 	github.com/jackc/pgservicefile v0.0.0-20240606120523-5a60cdf6a761 // indirect
 	github.com/jackc/puddle/v2 v2.2.2 // indirect
+	github.com/jackc/tern/v2 v2.4.3 // indirect
 	github.com/jellydator/ttlcache/v3 v3.4.1 // indirect
 	github.com/julienschmidt/httprouter v1.3.0 // indirect
 	github.com/klauspost/compress v1.20.0 // indirect

@@ -47,7 +47,6 @@ internal/
   validator.go             hot-reloaded per-usage revisor validators
   metrics.go               every Prometheus collector the service owns
   app.go                   the err-group: API server, subscriber, cleaner
-  migrate.go               tern helper behind the --migrate-db flag
   se.ecms.user.*.json      the seed constraint sets (tests and bootstrapping)
 postgres/                  sqlc-generated query code; queries.sql is the source
 schema/                    tern migrations, vendor.json for library migrations
@@ -140,8 +139,7 @@ the second column.
 |---|---|---|---|
 | `--db` | `CONN_STRING` | local dev database | Direct Postgres connection. Used for LISTEN/NOTIFY, migrations and, without a bouncer, all queries. Must not point at PgBouncer in transaction-pooling mode: LISTEN is a session-level command and silently never fires through it. |
 | `--db-bouncer` | `BOUNCER_CONN_STRING` | | PgBouncer connection string. When set and different from `--db`, all queries go through it and only the LISTEN connection stays direct. |
-| `--db-max-conns` | `DB_MAX_CONNS` | `16` | Size of the query pool; see the sizing note below. `0` or less leaves it to pgx (`max(4, NumCPU)` of the node). With a bouncer configured this sizes the bouncer pool and the direct pool is fixed at 2 (the LISTEN session and startup migrations). |
-| `--migrate-db` | `MIGRATE_DB` | `false` | Apply pending migrations at startup. For disposable environments only; production migrations run through elephant-platform, and this flag is slated for removal. |
+| `--db-max-conns` | `DB_MAX_CONNS` | `16` | Size of the query pool; see the sizing note below. `0` or less leaves it to pgx (`max(4, NumCPU)` of the node). With a bouncer configured this sizes the bouncer pool and the direct pool is fixed at 2 (the LISTEN session plus one spare). |
 
 The pool is sized explicitly because pgx's default is `max(4, NumCPU)` read
 from the node's cpuset, which changes on reschedule. Every RPC runs one to
@@ -168,12 +166,6 @@ Provided by elephantine's `AuthenticationCLIFlags`.
 | `--cleanup-interval` | `CLEANUP_INTERVAL` | `12h` | How often the retention cleaner deletes system messages older than two weeks and inbox messages older than six months. Runs on one replica at a time under the `cleaner` job lock. The sweep is cheap; hourly is the sensible lower bound. |
 
 ## Pending work
-
-**`--migrate-db` should go.** Services in this fleet never migrate their own
-schema; the flag came in with the schema work in v1.3.0 and the PR #75 review
-asked for it to stay out of production. Removing it also removes
-`internal/migrate.go`. Embedding the migrations stays, because the tests and
-the platform tooling read them.
 
 **Retire Twirp.** Both stacks are served and the handlers speak the `rpc`
 error vocabulary. Step 3 of elephantine's `docs/migration-service.md`, dropping

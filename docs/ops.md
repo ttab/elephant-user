@@ -185,9 +185,10 @@ rebuilt from `document_schema` on every reload.
 
 Migrations live in `schema/` as tern files and are applied by elephant-platform
 (`go run ./cmd/setup db migrate`) in hosted environments and by `mage
-sql:migrate` locally. **The service must not migrate its own schema at
-startup.** The `--migrate-db` flag exists for disposable environments and is
-kept for now; do not set it in production.
+sql:migrate` locally. **The service never migrates its own schema.** The
+migrations are embedded in the binary for the tests and the platform tooling,
+and nothing in the service reads them at startup. The `--migrate-db` flag that
+did was removed in v1.6.0.
 
 `schema/004_sequence_counter.sql` (v1.4.0) is the one migration that needs a
 service window, because old and new code cannot share the schema in either
@@ -430,9 +431,6 @@ unauthenticated and internal only.
 
 ## Not in place yet
 
-- **`--migrate-db` still exists.** It contradicts the rule that services do
-  not migrate themselves and is slated for removal; until then it must stay
-  off in production.
 - **No idempotency on pushes.** A retried `PushInboxMessage` duplicates.
   Planned with the inbox redesign.
 - **Twirp is still served.** The `/twirp/` mount goes in the next major
