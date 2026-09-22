@@ -24,9 +24,8 @@ strictly ordered, and everything after the pools is wired through
 main.go
   pubsubPool  = newPool(CONN_STRING, DB_MAX_CONNS)  direct connection: LISTEN needs a session
   dbpool      = pubsubPool, or newPool(BOUNCER_CONN_STRING, DB_MAX_CONNS) if set,
-                in which case pubsubPool is sized 2 (LISTEN + startup migration)
+                in which case pubsubPool is sized 2 (LISTEN + one spare)
   pool metrics registered ("main", and "pubsub" when they differ)
-  [--migrate-db] internal.Migrate(pubsubPool)      disposable environments only, see ops.md
   auth        = OIDC discovery + JWKS from OIDC_CONFIG
   metrics     = internal.NewMetrics(DefaultRegisterer)
   store       = internal.NewPGStore(dbpool)         FanOuts for the five NOTIFY channels

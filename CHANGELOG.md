@@ -4,6 +4,25 @@ All notable changes to elephant-user from v1.0.0 onwards are documented here.
 Entries are derived from the release tags; the linked pull requests hold the
 detail. Earlier history is not reconstructed.
 
+## [v1.6.0] - Unreleased
+
+**Breaking (`--migrate-db` removed):** the service no longer applies schema
+migrations at startup, and the `--migrate-db` flag and `MIGRATE_DB` variable
+are gone. A deployment that passes the flag fails to start on an unknown flag;
+one that only sets the variable starts and silently skips the migration. Run
+migrations as a deliberate step instead: `go run ./cmd/setup db migrate` from
+elephant-platform in hosted environments, `mage sql:migrate` locally. The
+migrations stay embedded in the binary for the tests and the platform tooling.
+
+Changes:
+
+- Dependency upgrades: `ttab/mage` to v0.15.0, elephant-api to v0.25.2, eltest
+  to v0.5.0 and `urfave/cli` to v3.13.0. Neither mage nor elephant-api changes
+  anything in this service: the magefile imports only the `sql` and `docs`
+  namespaces, and the elephant-api changes are index-only. eltest now pulls the
+  Postgres and minio test images from `ghcr.io/ttab/elephant-images` instead of
+  Docker Hub, which is where a test runner has to be able to pull from.
+
 ## [v1.5.0] - 2026-09-16
 
 **New API surface (Connect):** every RPC is also served on the Connect path
