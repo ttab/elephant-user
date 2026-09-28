@@ -22,21 +22,23 @@ strictly ordered, and everything after the pools is wired through
 
 ```
 main.go
-  pubsubPool  = newPool(CONN_STRING, DB_MAX_CONNS)  direct connection: LISTEN needs a session
-  dbpool      = pubsubPool, or newPool(BOUNCER_CONN_STRING, DB_MAX_CONNS) if set,
-                in which case pubsubPool is sized 2 (LISTEN + one spare)
-  pool metrics registered ("main", and "pubsub" when they differ)
+  pools       = pg.NewPools(CONN_STRING, DB_MAX_CONNS, each pool pinged, metrics
+                  WithBouncer(BOUNCER_CONN_STRING), registered as "main" (and
+                  WithPubSub())                     "pubsub" when separate)
+    .Main     the bouncer pool if set, else the direct pool; sized DB_MAX_CONNS
+    .PubSub   direct, since LISTEN needs a session: a pool of its own sized 2
+              behind a bouncer (LISTEN + one spare), else the same pool as Main
   auth        = OIDC discovery + JWKS from OIDC_CONFIG
   metrics     = internal.NewMetrics(DefaultRegisterer)
-  store       = internal.NewPGStore(dbpool)         FanOuts for the five NOTIFY channels
+  store       = internal.NewPGStore(pools.Main)   FanOuts for the five NOTIFY channels
   validator   = internal.NewValidator(store)        loads active schemas, or fails startup
                 └─ go reloadLoop                    NOTIFY-driven, 5 min recheck
-  subscriber  = store.NewSubscriber(pubsubPool)     one LISTEN connection, feeds the FanOuts
+  subscriber  = store.NewSubscriber(pools.PubSub) one LISTEN connection, feeds the FanOuts
   server      = elephantine.NewAPIServer(...)       readiness entries: postgres, schemas (both optional)
 
 internal.Run: elephantine.NewErrGroup
   Required      "server"   APIServer.ListenAndServe(grace.CancelOnQuit)
-  GoWithRetries "pubsub"   subscriber.Run(grace.CancelOnStop)      5 s backoff, unlimited
+  GoWithRetries "pubsub"   subscriber.Run(grace.CancelOnStop)      ~5 s backoff, unlimited
   Go            "cleaner"  joblock.Run("cleaner") → sweep, then ticker(CLEANUP_INTERVAL) → sweep
 ```
 
@@ -46,8 +48,9 @@ restarted, rather than serving without retention. The subscriber is the
 exception: elephantine's `Subscriber.Run` reconnects by itself on ping
 timeouts but returns on other connection errors, such as a database failover
 resetting the LISTEN connection, and taking every replica down at that moment
-would extend the outage — so it is restarted in place with a 5 s backoff,
-counted in `task_restarts_total{task="pubsub"}`. Only the server is
+would extend the outage — so it is restarted in place about every 5 s, for as
+long as it keeps failing (`subscriberRetryOptions` pins elephantine's backoff
+curve flat at 5 s), counted in `task_restarts_total{task="pubsub"}`. Only the server is
 `Required`: its exit ends everything.
 
 The distinction matters at shutdown. On SIGTERM the subscriber and cleaner

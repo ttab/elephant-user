@@ -30,6 +30,21 @@ type Parameters struct {
 	CleanupInterval time.Duration
 }
 
+// subscriberRetryOptions restarts the LISTEN subscriber about every five
+// seconds for as long as it keeps failing. Pinning the floor, the ceiling and
+// the minimum runtime to the same value flattens the library's exponential
+// curve into the static five second backoff the subscriber has always had,
+// less the jitter on a run that outlived the minimum runtime: while it
+// is down, long-polls only wake on their timeouts, so a restart that backed
+// off towards the default one minute ceiling would stretch every outage by up
+// to a minute for the price of one connection attempt per replica every five
+// seconds. GiveUpAfter is left at zero, so it never gives up.
+var subscriberRetryOptions = elephantine.RetryOptions{
+	BackoffFloor: 5 * time.Second,
+	BackoffCeil:  5 * time.Second,
+	MinRuntime:   5 * time.Second,
+}
+
 // Run serves the API and the background tasks until the context is
 // cancelled or a task fails.
 func Run(ctx context.Context, p Parameters) error {
@@ -81,10 +96,10 @@ func Run(ctx context.Context, p Parameters) error {
 	if p.Subscriber != nil {
 		// The subscriber reconnects by itself on ping timeouts but
 		// returns on other connection errors, such as a database
-		// failover resetting the LISTEN connection. Restart it with
-		// backoff rather than taking the process down with it.
-		grp.GoWithRetries("pubsub", 0, elephantine.StaticBackoff(5*time.Second),
-			time.Hour, stopScoped(grace, func(ctx context.Context) error {
+		// failover resetting the LISTEN connection. Restart it forever
+		// rather than taking the process down with it.
+		grp.GoWithRetries("pubsub", subscriberRetryOptions,
+			stopScoped(grace, func(ctx context.Context) error {
 				return p.Subscriber.Run(ctx)
 			}))
 	}
