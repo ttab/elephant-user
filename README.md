@@ -176,8 +176,8 @@ the `/twirp/` mount, waits for the next major release and for
 `sub`; a message addressed to a unit or org is stored and reaches nobody. The
 redesign — one shared row per broadcast, a per-reader read-state table, a
 global inbox id from `sequence_counter` so one cursor spans a reader's whole
-owner set, and an idempotency key on push — is planned but not started, and
-nothing depends on the inbox API today.
+owner set, and an idempotent push keyed on the payload's document uuid — is
+decided but not started, and nothing depends on the inbox API today.
 
 **Notifications over a websocket.** The long-poll transports (`PollMessages`,
 `PollInboxMessages`, `PollEventLog`) are meant to be replaced by a websocket

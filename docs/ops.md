@@ -17,7 +17,7 @@ signal that shows each one. It does not explain how the code is built
 
 One process with three halves that fail independently:
 
-- **The API** — Twirp services for settings documents, key-value properties,
+- **The API** — the Twirp and Connect services for settings documents, key-value properties,
   system messages, inbox messages and schema configuration, all against
   Postgres. Stateless; every replica serves everything.
 - **The LISTEN connection** — one per replica, on a direct Postgres
@@ -37,7 +37,7 @@ down at once.
 | Repository | What it is to us |
 |---|---|
 | `ttab/elephant-user` | this service |
-| `ttab/elephant-api` | the protobuf definitions and generated Twirp code for the `user` package; the elephant client's TypeScript client is generated from the same source |
+| `ttab/elephant-api` | the protobuf definitions and the generated Twirp and Connect code for the `user` package; the elephant client's TypeScript client is generated from the same source |
 | `ttab/elephantine` | the shared framework: API server, auth middleware, job lock, LISTEN subscriber, metrics, graceful shutdown |
 | `ttab/revisor` | the newsdoc schema validator the settings and message documents are checked with |
 | `ttab/elephant-platform` | `setup db migrate`, the tool that applies this repository's migrations in hosted environments |
