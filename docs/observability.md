@@ -67,9 +67,13 @@ customer and does not label by org).
 
 ## Database
 
-From elephantine's `pg.NewPoolStatCollector`, one series set per pool: `main`
-always, `pubsub` only when a bouncer connection string is configured and the
-pools differ. `pgxpool_max_conns` is the configured size: `DB_MAX_CONNS`
+From the `pg.PoolStatCollector` that elephantine's `pg.NewPools` registers for
+each pool it creates, one series set per pool: `main` always, `pubsub` only
+when a bouncer connection string is configured and differs from
+`CONN_STRING`. A `BOUNCER_CONN_STRING` that is empty or equal to
+`CONN_STRING` is ignored, and the service runs on the direct pool alone; the
+`created connection pools` startup log line reports `bouncer=true` and the
+two pool sizes when the split is active. `pgxpool_max_conns` is the configured size: `DB_MAX_CONNS`
 (default 16) for the query pool, 2 for a dedicated LISTEN pool.
 
 - `pgxpool_acquired_conns{pool}` against `pgxpool_max_conns{pool}` — the
@@ -91,7 +95,7 @@ pools differ. `pgxpool_max_conns` is the configured size: `DB_MAX_CONNS`
 ## Background tasks
 
 - `task_restarts_total{task="pubsub"}` — the LISTEN subscriber returned an
-  error and was restarted after a 5 s backoff. It is the only task that is
+  error and was restarted after a backoff of about 5 s. It is the only task that is
   restarted in place, so it is the only label value that exists. A steady rate
   means the direct database connection is being reset repeatedly; long-polls
   fall back to their timeouts between restarts. The server and the cleaner are

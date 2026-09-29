@@ -58,7 +58,7 @@ does not need to.
 
 | Dependency | Needed for | Without it |
 |---|---|---|
-| Postgres, direct connection (`CONN_STRING`) | LISTEN/NOTIFY, migrations, and all queries unless a bouncer is configured | startup fails on the initial ping; at runtime every query fails and the `postgres` readiness entry reports it, but the probe stays green (see below) |
+| Postgres, direct connection (`CONN_STRING`) | LISTEN/NOTIFY, and all queries unless a bouncer is configured | startup fails on the initial ping; at runtime every query fails and the `postgres` readiness entry reports it, but the probe stays green (see below) |
 | Postgres via PgBouncer (`BOUNCER_CONN_STRING`, optional) | all queries when configured | same as above for queries; LISTEN is unaffected because it never goes through the bouncer |
 | OIDC provider (`OIDC_CONFIG`) | discovery document and JWKS at startup, key refresh afterwards | startup fails; a running replica keeps validating with cached keys until a key rotates |
 | An active config generation | validating `UpdateDocument` and `PushInboxMessage` | those two RPCs fail with an internal error; everything else works; readiness reports `schemas` as failing but stays green |

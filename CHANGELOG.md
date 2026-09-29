@@ -16,10 +16,22 @@ migrations stay embedded in the binary for the tests and the platform tooling.
 
 Changes:
 
-- Dependency upgrades: `ttab/mage` to v0.15.0, elephant-api to v0.25.2, eltest
-  to v0.5.0 and `urfave/cli` to v3.13.0. Neither mage nor elephant-api changes
-  anything in this service: the magefile imports only the `sql` and `docs`
-  namespaces, and the elephant-api changes are index-only. eltest now pulls the
+- A database that can't be reached at startup is reported as `create database
+  pools: create main pool: …` (or `create pubsub pool: …` for the direct pool
+  behind a bouncer), where it was `direct database: …` or `bouncer database:
+  …`. Behind a bouncer the bouncer pool is now created and pinged first.
+- The `created connection pools` startup log line reports the sizes the pools
+  were actually created with, so `max_conns` shows the pool's real size rather
+  than the flag value when `DB_MAX_CONNS` is zero or less.
+- The LISTEN subscriber is still restarted forever about every five seconds,
+  now through elephantine's restart pacer with its backoff pinned flat at five
+  seconds; the wait after a run that outlived five seconds is jittered between
+  two and a half and five.
+- Dependency upgrades: elephantine to v0.30.2, `ttab/mage` to v0.15.0,
+  elephant-api to v0.25.2, eltest to v0.5.0 and `urfave/cli` to v3.13.0.
+  Neither mage nor elephant-api changes anything in this service: the magefile
+  imports only the `sql` and `docs` namespaces, and the elephant-api changes
+  are index-only. eltest now pulls the
   Postgres and minio test images from `ghcr.io/ttab/elephant-images` instead of
   Docker Hub, which is where a test runner has to be able to pull from.
 

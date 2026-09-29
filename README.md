@@ -137,8 +137,8 @@ the second column.
 
 | Flag | Env | Default | What it does |
 |---|---|---|---|
-| `--db` | `CONN_STRING` | local dev database | Direct Postgres connection. Used for LISTEN/NOTIFY, migrations and, without a bouncer, all queries. Must not point at PgBouncer in transaction-pooling mode: LISTEN is a session-level command and silently never fires through it. |
-| `--db-bouncer` | `BOUNCER_CONN_STRING` | | PgBouncer connection string. When set and different from `--db`, all queries go through it and only the LISTEN connection stays direct. |
+| `--db` | `CONN_STRING` | local dev database | Direct Postgres connection. Used for LISTEN/NOTIFY and, without a bouncer, all queries. Must not point at PgBouncer in transaction-pooling mode: LISTEN is a session-level command and silently never fires through it. |
+| `--db-bouncer` | `BOUNCER_CONN_STRING` | | PgBouncer connection string. When set and different from `--db`, all queries go through it and only the LISTEN connection stays direct. An empty value, or one equal to `--db`, is ignored; the `created connection pools` startup log line says `bouncer=true` when the split is active. |
 | `--db-max-conns` | `DB_MAX_CONNS` | `16` | Size of the query pool; see the sizing note below. `0` or less leaves it to pgx (`max(4, NumCPU)` of the node). With a bouncer configured this sizes the bouncer pool and the direct pool is fixed at 2 (the LISTEN session plus one spare). |
 
 The pool is sized explicitly because pgx's default is `max(4, NumCPU)` read
