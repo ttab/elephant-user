@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log/slog"
 	"time"
 
 	"github.com/google/uuid"
@@ -58,17 +57,14 @@ type MessagesStore interface {
 }
 
 type MessagesService struct {
-	logger    *slog.Logger
 	store     MessagesStore
 	validator DocumentValidator
 }
 
 func NewMessagesService(
-	logger *slog.Logger, store MessagesStore,
-	validator DocumentValidator,
+	store MessagesStore, validator DocumentValidator,
 ) *MessagesService {
 	return &MessagesService{
-		logger:    logger,
 		store:     store,
 		validator: validator,
 	}
@@ -323,25 +319,12 @@ func (s *MessagesService) PollInboxMessages(
 		var res []*user.InboxMessage
 
 		for i := range msgs {
-			updated := ""
-			if !msgs[i].Updated.IsZero() {
-				updated = msgs[i].Updated.Format(time.RFC3339)
-			}
-
-			payload, err := unmarshalInboxPayload(msgs[i].Payload)
+			m, err := inboxMessageToRPC(msgs[i])
 			if err != nil {
 				return nil, err
 			}
 
-			res = append(res, &user.InboxMessage{
-				Recipient: msgs[i].Recipient,
-				Id:        msgs[i].ID,
-				Created:   msgs[i].Created.Format(time.RFC3339),
-				CreatedBy: msgs[i].CreatedBy,
-				Updated:   updated,
-				IsRead:    msgs[i].IsRead,
-				Payload:   payload,
-			})
+			res = append(res, m)
 		}
 
 		return res, nil
@@ -410,26 +393,13 @@ func (s *MessagesService) ListInboxMessages(
 	var res user.ListInboxMessagesResponse
 
 	for i := range msgs {
-		updated := ""
-		if !msgs[i].Updated.IsZero() {
-			updated = msgs[i].Updated.Format(time.RFC3339)
-		}
-
-		payload, err := unmarshalInboxPayload(msgs[i].Payload)
+		m, err := inboxMessageToRPC(msgs[i])
 		if err != nil {
 			return nil, rpc.Internalf(
 				"list inbox messages: %w", err)
 		}
 
-		res.Messages = append(res.Messages, &user.InboxMessage{
-			Recipient: msgs[i].Recipient,
-			Id:        msgs[i].ID,
-			Created:   msgs[i].Created.Format(time.RFC3339),
-			CreatedBy: msgs[i].CreatedBy,
-			Updated:   updated,
-			IsRead:    msgs[i].IsRead,
-			Payload:   payload,
-		})
+		res.Messages = append(res.Messages, m)
 	}
 
 	if len(msgs) > 0 {
@@ -488,15 +458,25 @@ func (s *MessagesService) DeleteInboxMessage(
 	return &user.DeleteInboxMessageResponse{}, nil
 }
 
-// unmarshalInboxPayload decodes a stored inbox message payload into the
-// RPC document.
-func unmarshalInboxPayload(raw json.RawMessage) (*newsdoc_rpc.Document, error) {
-	var doc newsdoc_rpc.Document
-
-	err := json.Unmarshal(raw, &doc)
+// inboxMessageToRPC maps a stored inbox message to its RPC shape.
+func inboxMessageToRPC(msg InboxMessage) (*user.InboxMessage, error) {
+	payload, err := unmarshalDocument(msg.Payload)
 	if err != nil {
-		return nil, fmt.Errorf("unmarshal payload: %w", err)
+		return nil, err
 	}
 
-	return &doc, nil
+	updated := ""
+	if !msg.Updated.IsZero() {
+		updated = msg.Updated.Format(time.RFC3339)
+	}
+
+	return &user.InboxMessage{
+		Recipient: msg.Recipient,
+		Id:        msg.ID,
+		Created:   msg.Created.Format(time.RFC3339),
+		CreatedBy: msg.CreatedBy,
+		Updated:   updated,
+		IsRead:    msg.IsRead,
+		Payload:   payload,
+	}, nil
 }

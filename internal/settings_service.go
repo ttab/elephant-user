@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"log/slog"
 	"time"
 
 	"github.com/google/uuid"
@@ -57,17 +56,14 @@ type SettingsStore interface {
 }
 
 type SettingsService struct {
-	logger    *slog.Logger
 	store     SettingsStore
 	validator DocumentValidator
 }
 
 func NewSettingsService(
-	logger *slog.Logger, store SettingsStore,
-	validator DocumentValidator,
+	store SettingsStore, validator DocumentValidator,
 ) *SettingsService {
 	return &SettingsService{
-		logger:    logger,
 		store:     store,
 		validator: validator,
 	}
@@ -102,11 +98,9 @@ func (s *SettingsService) GetDocument(
 		return nil, rpc.Internalf("get document: %w", err)
 	}
 
-	var newsdoc newsdoc_rpc.Document
-
-	err = json.Unmarshal(doc.Payload, &newsdoc)
+	newsdoc, err := unmarshalDocument(doc.Payload)
 	if err != nil {
-		return nil, rpc.Internalf("unmarshal payload: %w", err)
+		return nil, rpc.Internalf("%w", err)
 	}
 
 	return &user.GetDocumentResponse{
@@ -122,7 +116,7 @@ func (s *SettingsService) GetDocument(
 			Created:       doc.Created.Format(time.RFC3339),
 			Updated:       doc.Updated.Format(time.RFC3339),
 			UpdatedBy:     doc.UpdatedBy,
-			Payload:       &newsdoc,
+			Payload:       newsdoc,
 		},
 	}, nil
 }
@@ -149,12 +143,12 @@ func (s *SettingsService) ListDocuments(
 	res := make([]*user.Document, len(docs))
 
 	for i, d := range docs {
-		var newsdoc newsdoc_rpc.Document
+		newsdoc := &newsdoc_rpc.Document{}
 
 		if req.IncludePayload && len(d.Payload) > 0 {
-			err = json.Unmarshal(docs[i].Payload, &newsdoc)
+			newsdoc, err = unmarshalDocument(docs[i].Payload)
 			if err != nil {
-				return nil, rpc.Internalf("unmarshal payload: %w", err)
+				return nil, rpc.Internalf("%w", err)
 			}
 		}
 
@@ -170,7 +164,7 @@ func (s *SettingsService) ListDocuments(
 			Created:       d.Created.Format(time.RFC3339),
 			Updated:       d.Updated.Format(time.RFC3339),
 			UpdatedBy:     d.UpdatedBy,
-			Payload:       &newsdoc,
+			Payload:       newsdoc,
 		}
 	}
 

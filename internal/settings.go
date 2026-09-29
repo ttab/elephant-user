@@ -1,6 +1,7 @@
 package internal
 
 import (
+	"encoding/json"
 	"errors"
 	"time"
 
@@ -25,7 +26,7 @@ type Document struct {
 	Created       time.Time
 	Updated       time.Time
 	UpdatedBy     string
-	Payload       []byte
+	Payload       json.RawMessage
 }
 
 type DocumentUpdate struct {
@@ -36,7 +37,7 @@ type DocumentUpdate struct {
 	SchemaVersion string
 	Title         string
 	UpdatedBy     string
-	Payload       []byte
+	Payload       json.RawMessage
 }
 
 type EventLogEntry struct {

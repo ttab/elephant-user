@@ -39,7 +39,8 @@ and `#anchor` resolves. The lint workflow runs it.
 ```
 cmd/user/                  the service binary: flags, pools, wiring
 internal/
-  access.go                scopes and access control shared by the handlers
+  access.go                scopes and owner checks shared by the handlers
+  handlers.go              helpers shared by the handlers: validation errors, payload decoding, poll wait errors
   messages.go              messages feature contract: types and events
   messages_service.go      Messages handlers and the MessagesStore interface they consume
   messages_store.go        PGStore: messages and inbox

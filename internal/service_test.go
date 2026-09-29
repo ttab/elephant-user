@@ -548,8 +548,8 @@ func startElephantUser(t *testing.T) TestElephantUser {
 			Issuer: "test",
 		})
 
-	messagesService := internal.NewMessagesService(logger, store, validator)
-	settingsService := internal.NewSettingsService(logger, store, validator)
+	messagesService := internal.NewMessagesService(store, validator)
+	settingsService := internal.NewSettingsService(store, validator)
 	configurationService := internal.NewConfigurationService(logger, store)
 
 	err = internal.Run(ctx, internal.Parameters{
@@ -557,8 +557,8 @@ func startElephantUser(t *testing.T) TestElephantUser {
 		APIServer:            apiServer,
 		AuthInfoParser:       auth,
 		Registerer:           reg,
-		Messages:             messagesService,
-		Settings:             settingsService,
+		MessagesService:      messagesService,
+		SettingsService:      settingsService,
 		ConfigurationService: configurationService,
 	})
 	test.Mustf(t, err, "run application")
