@@ -39,10 +39,16 @@ and `#anchor` resolves. The lint workflow runs it.
 ```
 cmd/user/                  the service binary: flags, pools, wiring
 internal/
-  service.go               Settings and Messages handlers, access control
+  access.go                scopes and access control shared by the handlers
+  messages.go              messages feature contract: types and events
+  messages_service.go      Messages handlers and the MessagesStore interface they consume
+  messages_store.go        PGStore: messages and inbox
+  settings.go              settings feature contract: types, events, errors
+  settings_service.go      Settings handlers and the SettingsStore interface they consume
+  settings_store.go        PGStore: documents, properties, eventlog
   config_service.go        Configuration handlers
   config.go                config feature contract: types, events, errors
-  store.go                 PGStore: messages, settings, eventlog, subscriber, cleaner
+  store.go                 PGStore core: notify channels, subscriber, cleaner
   config_store.go          PGStore: config generations, schemas, deprecations
   validator.go             hot-reloaded per-usage revisor validators
   metrics.go               every Prometheus collector the service owns

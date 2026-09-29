@@ -232,7 +232,8 @@ func runUser(ctx context.Context, cmd *cli.Command) error {
 			return schemasReadyCheck(ctx, store)
 		})
 
-	service := internal.NewService(logger, store, validator)
+	messagesService := internal.NewMessagesService(logger, store, validator)
+	settingsService := internal.NewSettingsService(logger, store, validator)
 	configurationService := internal.NewConfigurationService(logger, store)
 
 	err = internal.Run(ctx, internal.Parameters{
@@ -240,7 +241,8 @@ func runUser(ctx context.Context, cmd *cli.Command) error {
 		APIServer:            server,
 		AuthInfoParser:       auth.AuthParser,
 		Registerer:           prometheus.DefaultRegisterer,
-		Service:              service,
+		Messages:             messagesService,
+		Settings:             settingsService,
 		ConfigurationService: configurationService,
 		Subscriber:           subscriber,
 		Store:                store,

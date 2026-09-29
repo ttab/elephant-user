@@ -77,7 +77,7 @@ validator; replicas scale reads and long-polls linearly.
 
 ### Settings documents
 
-`UpdateDocument` (`internal/service.go`) is the write path with the most
+`UpdateDocument` (`internal/settings_service.go`) is the write path with the most
 rules:
 
 1. **Scope** `user`. The target owner defaults to the caller's `sub`. Writing
@@ -91,7 +91,7 @@ rules:
    settings documents have no identity of their own; the key is
    `(owner, application, type, key)`. Validation errors are returned as
    `invalid_argument` with `err_count` and numbered meta entries.
-3. **One transaction** (`PGStore.UpdateDocument`, `internal/store.go`):
+3. **One transaction** (`PGStore.UpdateDocument`, `internal/settings_store.go`):
    upsert the owner into `user` (the FK target), upsert the `document` row
    with `version = version + 1`, then `logAndNotify`: reserve an eventlog id,
    insert the `eventlog` row, `pg_notify('event_log_update')`. Commit.
@@ -169,7 +169,7 @@ delivered. Two mechanisms, same principle:
 - **Message ids** are per recipient, from `message_write_lock`: one atomic
   `INSERT ... ON CONFLICT DO UPDATE SET current_message_id = current + 1
   RETURNING`, which creates the row on first use and row-locks it for the
-  rest of the transaction (`nextMessageID`, `internal/store.go`). Gapless and
+  rest of the transaction (`nextMessageID`, `internal/messages_store.go`). Gapless and
   commit-ordered per recipient. The retention cleaner leaves the lock rows
   alone, so ids never restart after old messages are deleted.
 
