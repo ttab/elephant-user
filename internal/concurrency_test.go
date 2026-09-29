@@ -1,6 +1,7 @@
 package internal_test
 
 import (
+	"encoding/json"
 	"fmt"
 	"sync"
 	"testing"
@@ -149,19 +150,26 @@ func TestConcurrentFirstMessage(t *testing.T) {
 
 		for i := range pushes {
 			wg.Go(func() {
+				payload, err := json.Marshal(&newsdoc.Document{
+					Uuid: fmt.Sprintf(
+						"3b482036-39fb-584d-%04d-%012d", round, i),
+					Type:  "core/inbox-message",
+					Title: fmt.Sprintf("Inbox Message %d", i),
+				})
+				if err != nil {
+					t.Errorf("round %d push %d: marshal payload: %v", round, i, err)
+
+					return
+				}
+
 				<-start
 
-				err := eu.Store.InsertInboxMessage(ctx, internal.InboxMessage{
+				err = eu.Store.InsertInboxMessage(ctx, internal.InboxMessage{
 					Recipient: recipient,
 					Created:   time.Now(),
 					CreatedBy: "core://application/test",
 					Updated:   time.Now(),
-					Payload: &newsdoc.Document{
-						Uuid: fmt.Sprintf(
-							"3b482036-39fb-584d-%04d-%012d", round, i),
-						Type:  "core/inbox-message",
-						Title: fmt.Sprintf("Inbox Message %d", i),
-					},
+					Payload:   payload,
 				})
 				if err != nil {
 					t.Errorf("round %d push %d: %v", round, i, err)

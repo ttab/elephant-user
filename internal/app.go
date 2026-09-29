@@ -18,7 +18,8 @@ type Parameters struct {
 	APIServer            *elephantine.APIServer
 	AuthInfoParser       elephantine.AuthInfoParser
 	Registerer           prometheus.Registerer
-	Service              *Service
+	MessagesService      *MessagesService
+	SettingsService      *SettingsService
 	ConfigurationService *ConfigurationService
 
 	// Subscriber is the pg LISTEN subscriber to run alongside the
@@ -58,8 +59,8 @@ func Run(ctx context.Context, p Parameters) error {
 		return fmt.Errorf("set up service options: %w", err)
 	}
 
-	messagesServer := user.NewMessagesServer(p.Service, opts.ServerOptions())
-	settingsServer := user.NewSettingsServer(p.Service, opts.ServerOptions())
+	messagesServer := user.NewMessagesServer(p.MessagesService, opts.ServerOptions())
+	settingsServer := user.NewSettingsServer(p.SettingsService, opts.ServerOptions())
 	configurationServer := user.NewConfigurationServer(
 		p.ConfigurationService, opts.ServerOptions())
 
@@ -71,9 +72,9 @@ func Run(ctx context.Context, p Parameters) error {
 	handlerOpts := opts.HandlerOptions()
 
 	messagesPath, messagesHandler := userconnect.NewMessagesServiceHandler(
-		p.Service, handlerOpts...)
+		p.MessagesService, handlerOpts...)
 	settingsPath, settingsHandler := userconnect.NewSettingsServiceHandler(
-		p.Service, handlerOpts...)
+		p.SettingsService, handlerOpts...)
 	configurationPath, configurationHandler := userconnect.NewConfigurationServiceHandler(
 		p.ConfigurationService, handlerOpts...)
 
