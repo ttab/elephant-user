@@ -28,12 +28,13 @@ Changes:
   seconds; the wait after a run that outlived five seconds is jittered between
   two and a half and five.
 - Dependency upgrades: elephantine to v0.30.2, `ttab/mage` to v0.15.0,
-  elephant-api to v0.25.2, eltest to v0.5.0 and `urfave/cli` to v3.13.0.
+  elephant-api to v0.26.0, eltest to v0.5.0 and `urfave/cli` to v3.13.0.
   Neither mage nor elephant-api changes anything in this service: the magefile
   imports only the `sql` and `docs` namespaces, and the elephant-api changes
-  are index-only. eltest now pulls the
-  Postgres and minio test images from `ghcr.io/ttab/elephant-images` instead of
-  Docker Hub, which is where a test runner has to be able to pull from.
+  are the index fields and the new collab declaration, neither of which the
+  `user` package touches. eltest now pulls the Postgres and minio test images
+  from `ghcr.io/ttab/elephant-images` instead of Docker Hub, which is where a
+  test runner has to be able to pull from.
 
 ## [v1.5.0] - 2026-09-16
 
