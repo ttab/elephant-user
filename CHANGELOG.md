@@ -4,7 +4,7 @@ All notable changes to elephant-user from v1.0.0 onwards are documented here.
 Entries are derived from the release tags; the linked pull requests hold the
 detail. Earlier history is not reconstructed.
 
-## [v1.6.0] - Unreleased
+## [v1.6.0] - 2026-09-29
 
 **Breaking (`--migrate-db` removed):** the service no longer applies schema
 migrations at startup, and the `--migrate-db` flag and `MIGRATE_DB` variable
