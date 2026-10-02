@@ -1,0 +1,7 @@
+{
+  "body": {
+    "code": "already_exists",
+    "message": "a different message with uuid 3b482036-39fb-584d-8477-000000000099 already exists for \"core://user/tester\""
+  },
+  "status": 409
+}

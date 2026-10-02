@@ -23,6 +23,7 @@ import (
 const (
 	twirpPrefix   = "/twirp"
 	settingsPath  = "/elephant.user.Settings/"
+	messagesPath  = "/elephant.user.Messages/"
 	configPath    = "/elephant.user.Configuration/"
 	jsonMediaType = "application/json"
 )
@@ -170,6 +171,40 @@ func TestDualStackBodies(t *testing.T) {
 
 	test.AgainstGolden(t, regenerate, connectMeta,
 		filepath.Join(dataDir, "required-argument-connect.json"))
+
+	// A push answers with the stored message's id, an int64 that protojson
+	// renders as a string on both stacks; the same uuid with a different
+	// payload is already_exists.
+	inboxBody := `{"recipient":"core://user/tester","payload":{"uuid":` +
+		`"3b482036-39fb-584d-8477-000000000099","type":"core/inbox-message",` +
+		`"uri":"message://inbox/dual","title":"Dual stack"}}`
+	inboxEdited := `{"recipient":"core://user/tester","payload":{"uuid":` +
+		`"3b482036-39fb-584d-8477-000000000099","type":"core/inbox-message",` +
+		`"uri":"message://inbox/dual","title":"Dual stack, edited"}}`
+
+	twirpPush := eu.postJSON(t, token,
+		twirpPrefix+messagesPath+"PushInboxMessage", inboxBody, nil)
+
+	test.AgainstGolden(t, regenerate, twirpPush,
+		filepath.Join(dataDir, "push-inbox-message-twirp.json"))
+
+	connectPush := eu.postJSON(t, token,
+		messagesPath+"PushInboxMessage", inboxBody, nil)
+
+	test.AgainstGolden(t, regenerate, connectPush,
+		filepath.Join(dataDir, "push-inbox-message-connect.json"))
+
+	twirpExists := eu.postJSON(t, token,
+		twirpPrefix+messagesPath+"PushInboxMessage", inboxEdited, nil)
+
+	test.AgainstGolden(t, regenerate, twirpExists,
+		filepath.Join(dataDir, "already-exists-twirp.json"))
+
+	connectExists := eu.postJSON(t, token,
+		messagesPath+"PushInboxMessage", inboxEdited, nil)
+
+	test.AgainstGolden(t, regenerate, connectExists,
+		filepath.Join(dataDir, "already-exists-connect.json"))
 }
 
 // TestDualStackErrorParity runs the error paths over both stacks against
@@ -232,6 +267,37 @@ func TestDualStackErrorParity(t *testing.T) {
 		_, connectErr := connectClients.Settings.GetDocument(userCtx, req)
 
 		check(t, connect.CodeNotFound, twirpErr, connectErr)
+	})
+
+	t.Run("inbox not found", func(t *testing.T) {
+		req := &user.UpdateInboxMessageRequest{Id: 999999, IsRead: true}
+
+		_, twirpErr := twirpClients.Messages.UpdateInboxMessage(userCtx, req)
+		_, connectErr := connectClients.Messages.UpdateInboxMessage(userCtx, req)
+
+		check(t, connect.CodeNotFound, twirpErr, connectErr)
+	})
+
+	t.Run("already exists", func(t *testing.T) {
+		push := func(title string) *user.PushInboxMessageRequest {
+			return &user.PushInboxMessageRequest{
+				Recipient: "core://user/tester",
+				Payload: &newsdoc.Document{
+					Uuid:  "3b482036-39fb-584d-8477-000000000098",
+					Type:  "core/inbox-message",
+					Uri:   "message://inbox/parity",
+					Title: title,
+				},
+			}
+		}
+
+		_, err := twirpClients.Messages.PushInboxMessage(userCtx, push("Parity"))
+		test.Mustf(t, err, "push the original")
+
+		_, twirpErr := twirpClients.Messages.PushInboxMessage(userCtx, push("Parity, edited"))
+		_, connectErr := connectClients.Messages.PushInboxMessage(userCtx, push("Parity, edited"))
+
+		check(t, connect.CodeAlreadyExists, twirpErr, connectErr)
 	})
 
 	t.Run("required argument", func(t *testing.T) {

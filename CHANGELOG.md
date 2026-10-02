@@ -4,6 +4,53 @@ All notable changes to elephant-user from v1.0.0 onwards are documented here.
 Entries are derived from the release tags; the linked pull requests hold the
 detail. Earlier history is not reconstructed.
 
+## [v1.7.0] - Unreleased
+
+**Breaking (inbox API):** inbox messages can be addressed to a unit or an
+org, and a reader sees everything addressed to their sub, org and units.
+`PushInboxMessage` accepts `core://unit/<id>` and `core://org/<id>` as
+`recipient`, requiring the `doc_admin` scope and membership of the target for
+those, and now answers with the stored message's `id`. The payload document's
+`uuid` identifies the message per recipient: pushing it again with the same
+payload returns the existing id and stores nothing, so a retry after a lost
+response is safe, and pushing it again with a different payload is
+`already_exists`. `PollInboxMessages` and `ListInboxMessages` return messages
+for all of the caller's owners in one id order, with `is_read` the caller's
+own and messages the caller deleted omitted; `UpdateInboxMessage` sets the
+caller's read state and `DeleteInboxMessage` hides the message for the caller
+only, both answering `not_found` for a message not addressed to the caller.
+`PollInboxMessagesRequest.size` is new, and `size` on both inbox calls is
+clamped to 100 where the list was unbounded. Ids are assigned from one
+counter across all recipients instead of per recipient, so an `after_id`
+cursor saved before the upgrade does not carry over. The inbox had no callers.
+Go callers need elephant-api v0.27.0 for the new fields.
+
+**Behaviour change (settings):** `PollEventLogRequest.size` sets how many
+events a poll returns, default 10 and clamped to 100 where it was fixed at
+10. The `delete` event for a shared document records the acting user in
+`updated_by` instead of the owner. A settings payload's `uuid` is validated
+when present: it used to be replaced before validation, so any value passed,
+and a malformed one is now `invalid_argument`. A payload without a uuid is
+still accepted.
+
+**Migrations:**
+
+- `schema/005_inbox_broadcast.sql` drops and recreates `inbox_message` with a
+  global `id`, the payload `uuid` and a unique `(recipient, uuid)`, adds
+  `inbox_message_state` for per-reader read and hidden flags, seeds
+  `sequence_counter('inbox')` and removes the inbox rows from
+  `message_write_lock`. Existing inbox rows are discarded; count them first.
+  Run it before the deploy. No service window: the inbox has no callers, but
+  old code cannot write the new table. Rollback recreates the old table empty.
+
+Changes:
+
+- New NOTIFY channel `inbox_state_update`, emitted when a reader's read state
+  changes or a message is hidden, with `{id, recipient, subject, created_by}`.
+  Nothing consumes it yet; it is for the notification stream.
+- A failing `PollEventLog` bootstrap is reported as `get latest event log id`
+  rather than `get latest message id`.
+
 ## [v1.6.0] - 2026-09-29
 
 **Breaking (`--migrate-db` removed):** the service no longer applies schema

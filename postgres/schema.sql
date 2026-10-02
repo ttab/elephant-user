@@ -136,7 +136,7 @@ CREATE TABLE public.document (
 
 CREATE TABLE public.document_schema (
     name text NOT NULL,
-    version text NOT NULL,
+    version text CONSTRAINT document_schema_version_not_null1 NOT NULL,
     spec jsonb NOT NULL,
     usage public.schema_usage NOT NULL
 );
@@ -166,13 +166,25 @@ CREATE TABLE public.eventlog (
 --
 
 CREATE TABLE public.inbox_message (
-    recipient text NOT NULL,
     id bigint NOT NULL,
-    created timestamp with time zone DEFAULT now() NOT NULL,
+    uuid uuid NOT NULL,
+    recipient text NOT NULL,
+    created timestamp with time zone NOT NULL,
     created_by text NOT NULL,
-    updated timestamp with time zone DEFAULT now() NOT NULL,
-    is_read boolean DEFAULT false NOT NULL,
     payload jsonb NOT NULL
+);
+
+
+--
+-- Name: inbox_message_state; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.inbox_message_state (
+    message_id bigint NOT NULL,
+    subject text NOT NULL,
+    is_read boolean DEFAULT false NOT NULL,
+    hidden boolean DEFAULT false NOT NULL,
+    updated timestamp with time zone NOT NULL
 );
 
 
@@ -320,7 +332,23 @@ ALTER TABLE ONLY public.eventlog
 --
 
 ALTER TABLE ONLY public.inbox_message
-    ADD CONSTRAINT inbox_message_pkey PRIMARY KEY (recipient, id);
+    ADD CONSTRAINT inbox_message_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: inbox_message inbox_message_recipient_uuid_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.inbox_message
+    ADD CONSTRAINT inbox_message_recipient_uuid_key UNIQUE (recipient, uuid);
+
+
+--
+-- Name: inbox_message_state inbox_message_state_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.inbox_message_state
+    ADD CONSTRAINT inbox_message_state_pkey PRIMARY KEY (message_id, subject);
 
 
 --
@@ -356,6 +384,14 @@ ALTER TABLE ONLY public.property
 
 
 --
+-- Name: schema_version schema_version_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.schema_version
+    ADD CONSTRAINT schema_version_pkey PRIMARY KEY (version);
+
+
+--
 -- Name: sequence_counter sequence_counter_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -386,6 +422,13 @@ CREATE INDEX eventlog_owner_id_idx ON public.eventlog USING btree (owner, id);
 
 
 --
+-- Name: inbox_message_recipient_id_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX inbox_message_recipient_id_idx ON public.inbox_message USING btree (recipient, id);
+
+
+--
 -- Name: config_generation_schema config_generation_schema_generation_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -410,11 +453,11 @@ ALTER TABLE ONLY public.document
 
 
 --
--- Name: inbox_message inbox_message_recipient_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+-- Name: inbox_message_state inbox_message_state_message_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
-ALTER TABLE ONLY public.inbox_message
-    ADD CONSTRAINT inbox_message_recipient_fkey FOREIGN KEY (recipient) REFERENCES public."user"(sub) ON DELETE CASCADE;
+ALTER TABLE ONLY public.inbox_message_state
+    ADD CONSTRAINT inbox_message_state_message_id_fkey FOREIGN KEY (message_id) REFERENCES public.inbox_message(id) ON DELETE CASCADE;
 
 
 --

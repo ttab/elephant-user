@@ -8,6 +8,7 @@ package postgres
 import (
 	"context"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
@@ -57,22 +58,6 @@ func (q *Queries) DeleteDocument(ctx context.Context, arg DeleteDocumentParams) 
 	var column_1 int32
 	err := row.Scan(&column_1)
 	return column_1, err
-}
-
-const deleteInboxMessage = `-- name: DeleteInboxMessage :exec
-DELETE FROM inbox_message
-WHERE recipient = $1
-      AND id = $2
-`
-
-type DeleteInboxMessageParams struct {
-	Recipient string
-	ID        int64
-}
-
-func (q *Queries) DeleteInboxMessage(ctx context.Context, arg DeleteInboxMessageParams) error {
-	_, err := q.db.Exec(ctx, deleteInboxMessage, arg.Recipient, arg.ID)
-	return err
 }
 
 const deleteOldInboxMessages = `-- name: DeleteOldInboxMessages :exec
@@ -481,6 +466,56 @@ func (q *Queries) GetEventLogEntriesAfterId(ctx context.Context, arg GetEventLog
 	return items, nil
 }
 
+const getInboxMessageByUUID = `-- name: GetInboxMessageByUUID :one
+SELECT id, (payload = $1::jsonb)::bool AS same_payload
+FROM inbox_message
+WHERE recipient = $2
+      AND uuid = $3
+`
+
+type GetInboxMessageByUUIDParams struct {
+	Payload   []byte
+	Recipient string
+	UUID      uuid.UUID
+}
+
+type GetInboxMessageByUUIDRow struct {
+	ID          int64
+	SamePayload bool
+}
+
+func (q *Queries) GetInboxMessageByUUID(ctx context.Context, arg GetInboxMessageByUUIDParams) (GetInboxMessageByUUIDRow, error) {
+	row := q.db.QueryRow(ctx, getInboxMessageByUUID, arg.Payload, arg.Recipient, arg.UUID)
+	var i GetInboxMessageByUUIDRow
+	err := row.Scan(&i.ID, &i.SamePayload)
+	return i, err
+}
+
+const getInboxMessageForReader = `-- name: GetInboxMessageForReader :one
+SELECT id, recipient, created_by
+FROM inbox_message
+WHERE id = $1
+      AND recipient = ANY($2::text[])
+`
+
+type GetInboxMessageForReaderParams struct {
+	ID     int64
+	Owners []string
+}
+
+type GetInboxMessageForReaderRow struct {
+	ID        int64
+	Recipient string
+	CreatedBy string
+}
+
+func (q *Queries) GetInboxMessageForReader(ctx context.Context, arg GetInboxMessageForReaderParams) (GetInboxMessageForReaderRow, error) {
+	row := q.db.QueryRow(ctx, getInboxMessageForReader, arg.ID, arg.Owners)
+	var i GetInboxMessageForReaderRow
+	err := row.Scan(&i.ID, &i.Recipient, &i.CreatedBy)
+	return i, err
+}
+
 const getLatestEventLogId = `-- name: GetLatestEventLogId :one
 SELECT COALESCE(MAX(id), 0)::bigint
 FROM eventlog
@@ -497,11 +532,11 @@ func (q *Queries) GetLatestEventLogId(ctx context.Context, owners []string) (int
 const getLatestInboxMessageId = `-- name: GetLatestInboxMessageId :one
 SELECT COALESCE(MAX(id), 0)::bigint AS latest_id
 FROM inbox_message
-WHERE recipient = $1
+WHERE recipient = ANY($1::text[])
 `
 
-func (q *Queries) GetLatestInboxMessageId(ctx context.Context, recipient string) (int64, error) {
-	row := q.db.QueryRow(ctx, getLatestInboxMessageId, recipient)
+func (q *Queries) GetLatestInboxMessageId(ctx context.Context, owners []string) (int64, error) {
+	row := q.db.QueryRow(ctx, getLatestInboxMessageId, owners)
 	var latest_id int64
 	err := row.Scan(&latest_id)
 	return latest_id, err
@@ -582,6 +617,25 @@ func (q *Queries) GetSchema(ctx context.Context, arg GetSchemaParams) (DocumentS
 		&i.Usage,
 	)
 	return i, err
+}
+
+const hideInboxMessage = `-- name: HideInboxMessage :exec
+INSERT INTO inbox_message_state (message_id, subject, is_read, hidden, updated)
+VALUES ($1, $2, false, true, $3)
+ON CONFLICT (message_id, subject) DO UPDATE
+SET hidden = true,
+    updated = EXCLUDED.updated
+`
+
+type HideInboxMessageParams struct {
+	MessageID int64
+	Subject   string
+	Updated   pgtype.Timestamptz
+}
+
+func (q *Queries) HideInboxMessage(ctx context.Context, arg HideInboxMessageParams) error {
+	_, err := q.db.Exec(ctx, hideInboxMessage, arg.MessageID, arg.Subject, arg.Updated)
+	return err
 }
 
 const insertConfigGeneration = `-- name: InsertConfigGeneration :one
@@ -683,30 +737,28 @@ func (q *Queries) InsertEventLog(ctx context.Context, arg InsertEventLogParams) 
 
 const insertInboxMessage = `-- name: InsertInboxMessage :exec
 INSERT INTO inbox_message(
-      recipient, id, created, created_by, updated, is_read, payload
+      id, uuid, recipient, created, created_by, payload
 ) VALUES (
-      $1, $2, $3, $4, $5, $6, $7
+      $1, $2, $3, $4, $5, $6
 )
 `
 
 type InsertInboxMessageParams struct {
-	Recipient string
 	ID        int64
+	UUID      uuid.UUID
+	Recipient string
 	Created   pgtype.Timestamptz
 	CreatedBy string
-	Updated   pgtype.Timestamptz
-	IsRead    bool
 	Payload   []byte
 }
 
 func (q *Queries) InsertInboxMessage(ctx context.Context, arg InsertInboxMessageParams) error {
 	_, err := q.db.Exec(ctx, insertInboxMessage,
-		arg.Recipient,
 		arg.ID,
+		arg.UUID,
+		arg.Recipient,
 		arg.Created,
 		arg.CreatedBy,
-		arg.Updated,
-		arg.IsRead,
 		arg.Payload,
 	)
 	return err
@@ -894,37 +946,57 @@ func (q *Queries) ListDocumentsMetadata(ctx context.Context, arg ListDocumentsMe
 }
 
 const listInboxMessagesAfterId = `-- name: ListInboxMessagesAfterId :many
-SELECT recipient, id, created, created_by, updated, is_read, payload
-FROM inbox_message
-WHERE recipient = $1
-      AND id > $2
-ORDER BY id ASC
-LIMIT $3::bigint
+SELECT m.id, m.uuid, m.recipient, m.created, m.created_by, m.payload,
+       COALESCE(s.is_read, false)::bool AS is_read
+FROM inbox_message AS m
+     LEFT JOIN inbox_message_state AS s
+       ON s.message_id = m.id AND s.subject = $1
+WHERE m.recipient = ANY($2::text[])
+      AND m.id > $3
+      AND NOT COALESCE(s.hidden, false)
+ORDER BY m.id ASC
+LIMIT $4::bigint
 `
 
 type ListInboxMessagesAfterIdParams struct {
-	Recipient string
-	AfterID   int64
-	Limit     int64
+	Subject string
+	Owners  []string
+	AfterID int64
+	Limit   int64
 }
 
-func (q *Queries) ListInboxMessagesAfterId(ctx context.Context, arg ListInboxMessagesAfterIdParams) ([]InboxMessage, error) {
-	rows, err := q.db.Query(ctx, listInboxMessagesAfterId, arg.Recipient, arg.AfterID, arg.Limit)
+type ListInboxMessagesAfterIdRow struct {
+	ID        int64
+	UUID      uuid.UUID
+	Recipient string
+	Created   pgtype.Timestamptz
+	CreatedBy string
+	Payload   []byte
+	IsRead    bool
+}
+
+func (q *Queries) ListInboxMessagesAfterId(ctx context.Context, arg ListInboxMessagesAfterIdParams) ([]ListInboxMessagesAfterIdRow, error) {
+	rows, err := q.db.Query(ctx, listInboxMessagesAfterId,
+		arg.Subject,
+		arg.Owners,
+		arg.AfterID,
+		arg.Limit,
+	)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []InboxMessage
+	var items []ListInboxMessagesAfterIdRow
 	for rows.Next() {
-		var i InboxMessage
+		var i ListInboxMessagesAfterIdRow
 		if err := rows.Scan(
-			&i.Recipient,
 			&i.ID,
+			&i.UUID,
+			&i.Recipient,
 			&i.Created,
 			&i.CreatedBy,
-			&i.Updated,
-			&i.IsRead,
 			&i.Payload,
+			&i.IsRead,
 		); err != nil {
 			return nil, err
 		}
@@ -937,37 +1009,57 @@ func (q *Queries) ListInboxMessagesAfterId(ctx context.Context, arg ListInboxMes
 }
 
 const listInboxMessagesBeforeId = `-- name: ListInboxMessagesBeforeId :many
-SELECT recipient, id, created, created_by, updated, is_read, payload
-FROM inbox_message
-WHERE recipient = $1
-      AND ($2::bigint = 0 OR id < $2)
-ORDER BY id DESC
-LIMIT $3::bigint
+SELECT m.id, m.uuid, m.recipient, m.created, m.created_by, m.payload,
+       COALESCE(s.is_read, false)::bool AS is_read
+FROM inbox_message AS m
+     LEFT JOIN inbox_message_state AS s
+       ON s.message_id = m.id AND s.subject = $1
+WHERE m.recipient = ANY($2::text[])
+      AND ($3::bigint = 0 OR m.id < $3)
+      AND NOT COALESCE(s.hidden, false)
+ORDER BY m.id DESC
+LIMIT $4::bigint
 `
 
 type ListInboxMessagesBeforeIdParams struct {
-	Recipient string
-	BeforeID  int64
-	Limit     int64
+	Subject  string
+	Owners   []string
+	BeforeID int64
+	Limit    int64
 }
 
-func (q *Queries) ListInboxMessagesBeforeId(ctx context.Context, arg ListInboxMessagesBeforeIdParams) ([]InboxMessage, error) {
-	rows, err := q.db.Query(ctx, listInboxMessagesBeforeId, arg.Recipient, arg.BeforeID, arg.Limit)
+type ListInboxMessagesBeforeIdRow struct {
+	ID        int64
+	UUID      uuid.UUID
+	Recipient string
+	Created   pgtype.Timestamptz
+	CreatedBy string
+	Payload   []byte
+	IsRead    bool
+}
+
+func (q *Queries) ListInboxMessagesBeforeId(ctx context.Context, arg ListInboxMessagesBeforeIdParams) ([]ListInboxMessagesBeforeIdRow, error) {
+	rows, err := q.db.Query(ctx, listInboxMessagesBeforeId,
+		arg.Subject,
+		arg.Owners,
+		arg.BeforeID,
+		arg.Limit,
+	)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []InboxMessage
+	var items []ListInboxMessagesBeforeIdRow
 	for rows.Next() {
-		var i InboxMessage
+		var i ListInboxMessagesBeforeIdRow
 		if err := rows.Scan(
-			&i.Recipient,
 			&i.ID,
+			&i.UUID,
+			&i.Recipient,
 			&i.Created,
 			&i.CreatedBy,
-			&i.Updated,
-			&i.IsRead,
 			&i.Payload,
+			&i.IsRead,
 		); err != nil {
 			return nil, err
 		}
@@ -1080,21 +1172,28 @@ func (q *Queries) ReserveSequenceValues(ctx context.Context, arg ReserveSequence
 	return value, err
 }
 
-const updateInboxMessage = `-- name: UpdateInboxMessage :exec
-UPDATE inbox_message
-SET is_read = $1
-WHERE recipient = $2
-      AND id = $3
+const setInboxMessageRead = `-- name: SetInboxMessageRead :exec
+INSERT INTO inbox_message_state (message_id, subject, is_read, hidden, updated)
+VALUES ($1, $2, $3, false, $4)
+ON CONFLICT (message_id, subject) DO UPDATE
+SET is_read = EXCLUDED.is_read,
+    updated = EXCLUDED.updated
 `
 
-type UpdateInboxMessageParams struct {
+type SetInboxMessageReadParams struct {
+	MessageID int64
+	Subject   string
 	IsRead    bool
-	Recipient string
-	ID        int64
+	Updated   pgtype.Timestamptz
 }
 
-func (q *Queries) UpdateInboxMessage(ctx context.Context, arg UpdateInboxMessageParams) error {
-	_, err := q.db.Exec(ctx, updateInboxMessage, arg.IsRead, arg.Recipient, arg.ID)
+func (q *Queries) SetInboxMessageRead(ctx context.Context, arg SetInboxMessageReadParams) error {
+	_, err := q.db.Exec(ctx, setInboxMessageRead,
+		arg.MessageID,
+		arg.Subject,
+		arg.IsRead,
+		arg.Updated,
+	)
 	return err
 }
 

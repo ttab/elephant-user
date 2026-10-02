@@ -3,13 +3,16 @@ package internal
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
 	newsdoc_rpc "github.com/ttab/elephant-api/newsdoc"
 	"github.com/ttab/elephant-api/user"
 	"github.com/ttab/elephant-user/postgres"
+	"github.com/ttab/elephantine"
 	"github.com/ttab/elephantine/rpc"
 )
 
@@ -19,21 +22,6 @@ type MessagesStore interface {
 		ctx context.Context, ch chan MessageEvent,
 		recipient string, afterID int64,
 	)
-	OnInboxMessageUpdate(
-		ctx context.Context, ch chan MessageEvent,
-		recipient string, afterID int64,
-	)
-	GetLatestInboxMessageID(
-		ctx context.Context, recipient string,
-	) (int64, error)
-	ListInboxMessagesBeforeID(
-		ctx context.Context, recipient string,
-		beforeID int64, size int64,
-	) ([]InboxMessage, error)
-	ListInboxMessagesAfterID(
-		ctx context.Context, recipient string,
-		afterID int64, size int64,
-	) ([]InboxMessage, error)
 	GetLatestMessageID(
 		ctx context.Context, recipient string,
 	) (int64, error)
@@ -41,18 +29,35 @@ type MessagesStore interface {
 		ctx context.Context, recipient string,
 		afterID int64, size int64,
 	) ([]Message, error)
-	InsertInboxMessage(
-		ctx context.Context, message InboxMessage,
-	) error
 	InsertMessage(
 		ctx context.Context, message Message,
 	) error
-	UpdateInboxMessage(
-		ctx context.Context, recipient string,
-		id int64, isRead bool,
+
+	OnInboxMessageUpdate(
+		ctx context.Context, ch chan MessageEvent,
+		reader InboxReader, afterID int64,
+	)
+	GetLatestInboxMessageID(
+		ctx context.Context, reader InboxReader,
+	) (int64, error)
+	ListInboxMessagesBeforeID(
+		ctx context.Context, reader InboxReader,
+		beforeID int64, size int64,
+	) ([]InboxMessage, error)
+	ListInboxMessagesAfterID(
+		ctx context.Context, reader InboxReader,
+		afterID int64, size int64,
+	) ([]InboxMessage, error)
+	InsertInboxMessage(
+		ctx context.Context, message InboxMessage,
+	) (int64, error)
+	SetInboxMessageRead(
+		ctx context.Context, reader InboxReader, id int64,
+		isRead bool, updated time.Time,
 	) error
-	DeleteInboxMessage(
-		ctx context.Context, recipient string, id int64,
+	HideInboxMessage(
+		ctx context.Context, reader InboxReader, id int64,
+		updated time.Time,
 	) error
 }
 
@@ -122,58 +127,6 @@ func (s *MessagesService) PushMessage(
 	}
 
 	return &user.PushMessageResponse{}, nil
-}
-
-// PushInboxMessage implements user.Messages.
-func (s *MessagesService) PushInboxMessage(
-	ctx context.Context, req *user.PushInboxMessageRequest,
-) (*user.PushInboxMessageResponse, error) {
-	auth, err := rpc.RequireAnyScope(ctx, ScopeUser)
-	if err != nil {
-		return nil, err
-	}
-
-	if req.Recipient == "" {
-		return nil, rpc.RequiredArgument("recipient")
-	}
-
-	if req.Payload == nil {
-		return nil, rpc.RequiredArgument("payload")
-	}
-
-	newsdoc := newsdoc_rpc.DocumentFromRPC(req.Payload)
-
-	validationResult, err := s.validator.ValidateDocument(
-		ctx, postgres.SchemaUsageMessages, &newsdoc)
-	if err != nil {
-		return nil, rpc.Internalf("validate newsdoc payload: %w", err)
-	}
-
-	if len(validationResult) > 0 {
-		return nil, validationError(validationResult)
-	}
-
-	payload, err := json.Marshal(req.Payload)
-	if err != nil {
-		return nil, rpc.Internalf("marshal message payload: %w", err)
-	}
-
-	now := time.Now()
-
-	err = s.store.InsertInboxMessage(ctx, InboxMessage{
-		Recipient: req.Recipient,
-		Created:   now,
-		CreatedBy: auth.Claims.Subject,
-		Updated:   now,
-		IsRead:    false,
-		Payload:   payload,
-	})
-	if err != nil {
-		return nil, rpc.Internalf(
-			"push inbox message: %w", err)
-	}
-
-	return &user.PushInboxMessageResponse{}, nil
 }
 
 // PollMessages implements user.Messages.
@@ -280,6 +233,98 @@ func (s *MessagesService) PollMessages(
 	}, nil
 }
 
+// inboxReader is the caller as an inbox reader: everything addressed to
+// their sub, org or units is theirs to read, under their own read state.
+func inboxReader(auth *elephantine.AuthInfo) InboxReader {
+	return InboxReader{
+		Owners:  getAllOwners(auth),
+		Subject: auth.Claims.Subject,
+	}
+}
+
+// isGroupRecipient reports whether an inbox recipient is a unit or an org
+// rather than a user. Anything that is not a unit or an org follows the
+// user model, service subjects included.
+func isGroupRecipient(recipient string) bool {
+	return strings.HasPrefix(recipient, "core://unit/") ||
+		strings.HasPrefix(recipient, "core://org/")
+}
+
+// PushInboxMessage implements user.Messages.
+func (s *MessagesService) PushInboxMessage(
+	ctx context.Context, req *user.PushInboxMessageRequest,
+) (*user.PushInboxMessageResponse, error) {
+	auth, err := rpc.RequireAnyScope(ctx, ScopeUser)
+	if err != nil {
+		return nil, err
+	}
+
+	if req.Recipient == "" {
+		return nil, rpc.RequiredArgument("recipient")
+	}
+
+	// A unit or org recipient follows the shared-write rule for settings
+	// documents: the doc_admin scope and membership of the target.
+	if isGroupRecipient(req.Recipient) {
+		if !auth.Claims.HasScope(ScopeDocAdmin) {
+			return nil, rpc.PermissionDeniedf(
+				"only admins can push messages to a unit or org")
+		}
+
+		if !isAllowedOwner(auth, req.Recipient) {
+			return nil, rpc.PermissionDeniedf(
+				"not allowed to push messages to %q", req.Recipient)
+		}
+	}
+
+	if req.Payload == nil {
+		return nil, rpc.RequiredArgument("payload")
+	}
+
+	newsdoc := newsdoc_rpc.DocumentFromRPC(req.Payload)
+
+	validationResult, err := s.validator.ValidateDocument(
+		ctx, postgres.SchemaUsageMessages, &newsdoc)
+	if err != nil {
+		return nil, rpc.Internalf("validate newsdoc payload: %w", err)
+	}
+
+	if len(validationResult) > 0 {
+		return nil, validationError(validationResult)
+	}
+
+	// The validator has already required a well-formed uuid; this parse
+	// is what the store needs and a guard against that ever changing.
+	docUUID, err := uuid.Parse(req.Payload.Uuid)
+	if err != nil {
+		return nil, rpc.InvalidArgument("payload.uuid", err.Error())
+	}
+
+	payload, err := json.Marshal(req.Payload)
+	if err != nil {
+		return nil, rpc.Internalf("marshal message payload: %w", err)
+	}
+
+	id, err := s.store.InsertInboxMessage(ctx, InboxMessage{
+		UUID:      docUUID,
+		Recipient: req.Recipient,
+		Created:   time.Now(),
+		CreatedBy: auth.Claims.Subject,
+		Payload:   payload,
+	})
+	if errors.Is(err, ErrInboxMessageConflict) {
+		return nil, rpc.AlreadyExists(fmt.Sprintf(
+			"a different message with uuid %s already exists for %q",
+			req.Payload.Uuid, req.Recipient))
+	}
+
+	if err != nil {
+		return nil, rpc.Internalf("push inbox message: %w", err)
+	}
+
+	return &user.PushInboxMessageResponse{Id: id}, nil
+}
+
 // PollInboxMessages implements user.Messages.
 func (s *MessagesService) PollInboxMessages(
 	ctx context.Context, req *user.PollInboxMessagesRequest,
@@ -289,20 +334,21 @@ func (s *MessagesService) PollInboxMessages(
 		return nil, err
 	}
 
+	reader := inboxReader(auth)
+	limit := clampSize(req.Size)
+
 	// Start listening for new messages.
 	notifications := make(chan MessageEvent, 1)
 
 	go s.store.OnInboxMessageUpdate(
-		ctx, notifications, auth.Claims.Subject, req.AfterId,
+		ctx, notifications, reader, req.AfterId,
 	)
 
-	limit := int64(10)
-
 	if req.AfterId == -1 {
-		latestID, err := s.store.GetLatestInboxMessageID(ctx, auth.Claims.Subject)
+		latestID, err := s.store.GetLatestInboxMessageID(ctx, reader)
 		if err != nil {
 			return nil, rpc.Internalf(
-				"get latest message id: %w", err)
+				"get latest inbox message id: %w", err)
 		}
 
 		req.AfterId = latestID
@@ -310,7 +356,7 @@ func (s *MessagesService) PollInboxMessages(
 
 	listMessages := func() ([]*user.InboxMessage, error) {
 		msgs, err := s.store.ListInboxMessagesAfterID(
-			ctx, auth.Claims.Subject, req.AfterId, limit,
+			ctx, reader, req.AfterId, limit,
 		)
 		if err != nil {
 			return nil, fmt.Errorf("after id %d: %w", req.AfterId, err)
@@ -377,13 +423,8 @@ func (s *MessagesService) ListInboxMessages(
 		return nil, err
 	}
 
-	size := int64(10)
-	if req.Size > 0 {
-		size = req.Size
-	}
-
 	msgs, err := s.store.ListInboxMessagesBeforeID(
-		ctx, auth.Claims.Subject, req.BeforeId, size,
+		ctx, inboxReader(auth), req.BeforeId, clampSize(req.Size),
 	)
 	if err != nil {
 		return nil, rpc.Internalf(
@@ -424,9 +465,13 @@ func (s *MessagesService) UpdateInboxMessage(
 			"cannot be less than 1")
 	}
 
-	err = s.store.UpdateInboxMessage(
-		ctx, auth.Claims.Subject, req.Id, req.IsRead,
+	err = s.store.SetInboxMessageRead(
+		ctx, inboxReader(auth), req.Id, req.IsRead, time.Now(),
 	)
+	if errors.Is(err, ErrInboxMessageNotFound) {
+		return nil, rpc.NotFound("no such inbox message")
+	}
+
 	if err != nil {
 		return nil, rpc.Internalf("update inbox message: %w", err)
 	}
@@ -448,9 +493,13 @@ func (s *MessagesService) DeleteInboxMessage(
 			"cannot be less than 1")
 	}
 
-	err = s.store.DeleteInboxMessage(
-		ctx, auth.Claims.Subject, req.Id,
+	err = s.store.HideInboxMessage(
+		ctx, inboxReader(auth), req.Id, time.Now(),
 	)
+	if errors.Is(err, ErrInboxMessageNotFound) {
+		return nil, rpc.NotFound("no such inbox message")
+	}
+
 	if err != nil {
 		return nil, rpc.Internalf("delete inbox message: %w", err)
 	}
@@ -458,24 +507,23 @@ func (s *MessagesService) DeleteInboxMessage(
 	return &user.DeleteInboxMessageResponse{}, nil
 }
 
-// inboxMessageToRPC maps a stored inbox message to its RPC shape.
+// inboxMessageToRPC maps a stored inbox message to its RPC shape. Messages
+// are not changed after creation, so updated equals created; the reader's
+// state is not reflected in it.
 func inboxMessageToRPC(msg InboxMessage) (*user.InboxMessage, error) {
 	payload, err := unmarshalDocument(msg.Payload)
 	if err != nil {
 		return nil, err
 	}
 
-	updated := ""
-	if !msg.Updated.IsZero() {
-		updated = msg.Updated.Format(time.RFC3339)
-	}
+	created := msg.Created.Format(time.RFC3339)
 
 	return &user.InboxMessage{
 		Recipient: msg.Recipient,
 		Id:        msg.ID,
-		Created:   msg.Created.Format(time.RFC3339),
+		Created:   created,
 		CreatedBy: msg.CreatedBy,
-		Updated:   updated,
+		Updated:   created,
 		IsRead:    msg.IsRead,
 		Payload:   payload,
 	}, nil
