@@ -23,7 +23,7 @@ only, both answering `not_found` for a message not addressed to the caller.
 clamped to 100 where the list was unbounded. Ids are assigned from one
 counter across all recipients instead of per recipient, so an `after_id`
 cursor saved before the upgrade does not carry over. The inbox had no callers.
-Go callers need elephant-api v0.27.0 for the new fields.
+Go callers need elephant-api v0.28.0 for the new fields.
 
 **Behaviour change (settings):** `PollEventLogRequest.size` sets how many
 events a poll returns, default 10 and clamped to 100 where it was fixed at
