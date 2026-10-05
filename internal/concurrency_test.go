@@ -314,6 +314,42 @@ func TestConcurrentInboxPushes(t *testing.T) {
 		return payload, docUUID
 	}
 
+	// A reader spanning every recipient tails with "id > after_id" WHILE
+	// the pushes run. With commit-ordered ids it cannot skip a message; with
+	// a sequence or identity column a slow push could commit a lower id
+	// after the cursor had moved past it. Listing only after the pushes
+	// would prove nothing, since ORDER BY id hides the race.
+	reader := internal.InboxReader{Owners: recipients, Subject: "core://user/reader"}
+
+	var (
+		seen    []int64
+		afterID int64
+		tailErr error
+		tailWG  sync.WaitGroup
+	)
+
+	tailWG.Go(func() {
+		deadline := time.Now().Add(30 * time.Second)
+
+		for len(seen) < pushes && time.Now().Before(deadline) {
+			msgs, err := eu.Store.ListInboxMessagesAfterID(ctx, reader, afterID, 500)
+			if err != nil {
+				tailErr = err
+
+				return
+			}
+
+			for _, m := range msgs {
+				seen = append(seen, m.ID)
+				afterID = m.ID
+			}
+
+			if len(msgs) == 0 {
+				time.Sleep(time.Millisecond)
+			}
+		}
+	})
+
 	var (
 		start = make(chan struct{})
 		wg    sync.WaitGroup
@@ -349,30 +385,27 @@ func TestConcurrentInboxPushes(t *testing.T) {
 
 	close(start)
 	wg.Wait()
+	tailWG.Wait()
 
 	if t.Failed() {
 		return
 	}
 
+	test.Mustf(t, tailErr, "tail inbox messages")
+
 	test.Equalf(t, pushes, len(got), "every push got its own id")
+	test.Equalf(t, pushes, len(seen), "the tailer saw every message")
 
-	reader := internal.InboxReader{Owners: recipients, Subject: "core://user/reader"}
-
-	msgs, err := eu.Store.ListInboxMessagesAfterID(ctx, reader, 0, pushes+1)
-	test.Mustf(t, err, "list inbox messages across all recipients")
-
-	test.Equalf(t, pushes, len(msgs), "a reader spanning every recipient sees every message")
-
-	for i := 1; i < len(msgs); i++ {
-		if msgs[i].ID <= msgs[i-1].ID {
+	for i := 1; i < len(seen); i++ {
+		if seen[i] <= seen[i-1] {
 			t.Fatalf("inbox ids not increasing at index %d: %d after %d",
-				i, msgs[i].ID, msgs[i-1].ID)
+				i, seen[i], seen[i-1])
 		}
 	}
 
-	for _, m := range msgs {
-		if !got[m.ID] {
-			t.Fatalf("listed id %d was not returned by any push", m.ID)
+	for _, id := range seen {
+		if !got[id] {
+			t.Fatalf("tailed id %d was not returned by any push", id)
 		}
 	}
 
@@ -428,7 +461,7 @@ func TestConcurrentInboxPushes(t *testing.T) {
 
 	one := internal.InboxReader{Owners: []string{"core://unit/one"}, Subject: "core://user/reader"}
 
-	msgs, err = eu.Store.ListInboxMessagesAfterID(ctx, one, 0, pushes+same)
+	msgs, err := eu.Store.ListInboxMessagesAfterID(ctx, one, 0, pushes+same)
 	test.Mustf(t, err, "list the unit's messages")
 
 	var stored int

@@ -228,13 +228,16 @@ is the token's `sub`. The payload document's `uuid` identifies the message
 per recipient: `(recipient, uuid)` is unique, a push whose pair exists with
 the same payload answers with the existing id and stores nothing, and one
 whose stored payload differs is `already_exists`. That is what makes a
-retry after a lost response safe. The write is one transaction: look the
-uuid up, take the next id from `sequence_counter('inbox')`, look it up again
-under the counter lock, insert, `pg_notify('inbox_message_update',
-{id, recipient})`, and answer with the id. The counter is the first and only
-lock the push takes, so pushes serialise on it and the uuid check cannot
-race another push of the same document; because the push locks no data row,
-it cannot deadlock against the eventlog writers either.
+retry after a lost response safe. The push first looks the uuid up outside
+any transaction, which answers the common retry without touching the counter.
+Then one transaction: take the next id from `sequence_counter('inbox')`, look
+the uuid up again under the counter lock, insert, `pg_notify('inbox_message_update',
+{id, recipient})`, and answer with the id; if the second lookup finds the
+message after all, the transaction rolls back so the reserved id is handed
+back. The counter is the first and only lock the push takes, so pushes
+serialise on it and the uuid check cannot race another push of the same
+document; because the push locks no data row, it cannot deadlock against the
+eventlog writers either.
 
 Reads span the caller's owner set, `sub` + `org` + `units`, the same
 `getAllOwners` list `PollEventLog` uses: `PollInboxMessages(after_id, size)`

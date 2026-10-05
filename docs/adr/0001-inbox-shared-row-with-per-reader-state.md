@@ -42,3 +42,7 @@ to the one the document already carries.
 - Read-state changes emit `inbox_state_update` but the poll cannot carry
   them, since a flag change mints no id; cross-tab sync waits for the
   notification stream.
+- Idempotency discloses existence: any `user`-scoped caller who knows a
+  payload uuid can learn that a recipient already has that message, by the
+  id a same-payload push returns or the `already_exists` a different payload
+  gets. With random uuids the exposure is negligible and accepted.

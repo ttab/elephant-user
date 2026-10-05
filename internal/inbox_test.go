@@ -170,15 +170,28 @@ func TestInboxBroadcast(t *testing.T) {
 	})
 	test.IsRPCError(t, err, connect.CodeNotFound)
 
-	// The poll spans the same owners, skips what the caller hid, and
-	// honours size.
+	// The poll spans the same owners and skips what the caller hid; B has
+	// two visible messages, so size 1 returns one and the cursor stops on
+	// it, and a second poll after that id returns the other.
 	polled, err := eu.Messages.PollInboxMessages(memberB, &user.PollInboxMessagesRequest{
 		AfterId: 0,
-		Size:    2,
+		Size:    1,
 	})
-	test.Mustf(t, err, "poll as B")
-	expectIDs([]int64{1, 3}, ids(polled.Messages), "poll returns the visible messages in id order")
-	test.Equalf(t, int64(3), polled.LastId, "last id is the last returned")
+	test.Mustf(t, err, "poll as B with size 1")
+	expectIDs([]int64{1}, ids(polled.Messages), "size limits the poll")
+	test.Equalf(t, int64(1), polled.LastId, "last id is the last returned")
+
+	polled, err = eu.Messages.PollInboxMessages(memberB, &user.PollInboxMessagesRequest{
+		AfterId: polled.LastId,
+		Size:    1,
+	})
+	test.Mustf(t, err, "poll as B after the first page")
+	expectIDs([]int64{3}, ids(polled.Messages), "the next page skips the hidden message")
+
+	// The list takes the same size; a value over the ceiling is served the
+	// ceiling rather than refused.
+	expectIDs([]int64{3}, ids(list(memberB, 1)), "size limits the list")
+	expectIDs([]int64{3, 1}, ids(list(memberB, 500)), "an oversized size is clamped, not refused")
 
 	// A poll started before a group push wakes up on it.
 	woke := make(chan *user.PollInboxMessagesResponse, 1)

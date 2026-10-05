@@ -29,10 +29,6 @@ func (s *PGStore) OnMessageUpdate(
 	})
 }
 
-// OnInboxMessageUpdate notifies the channel ch of inbox message updates
-// for a recipient.
-// Subscription is automatically cancelled once the context is cancelled.
-//
 // GetLatestMessageID implements [MessagesStore].
 func (s *PGStore) GetLatestMessageID(
 	ctx context.Context, recipient string,
@@ -153,6 +149,10 @@ func notifyMessageUpdated(
 // sequenceInbox is the sequence_counter row that hands out inbox message
 // ids: one commit-ordered id space across every recipient.
 const sequenceInbox = "inbox"
+
+// inboxMessageStateFK is the constraint that fails when a state row is
+// written for a message the cleaner has just deleted.
+const inboxMessageStateFK = "inbox_message_state_message_id_fkey"
 
 // OnInboxMessageUpdate notifies ch of inbox messages pushed to any of the
 // reader's owners with an id above afterID. Subscription is cancelled with
@@ -294,9 +294,12 @@ func (s *PGStore) InsertInboxMessage(
 		}
 
 		if found {
+			// Lost the race to another push of the same document.
+			// Roll back so the reserved id is handed back to the
+			// counter, and answer with the message that won.
 			id = existing
 
-			return nil
+			return errInboxMessageExists
 		}
 
 		err = q.InsertInboxMessage(ctx, postgres.InsertInboxMessageParams{
@@ -323,12 +326,20 @@ func (s *PGStore) InsertInboxMessage(
 
 		return nil
 	})
+	if errors.Is(err, errInboxMessageExists) {
+		return id, nil
+	}
+
 	if err != nil {
 		return 0, err
 	}
 
 	return id, nil
 }
+
+// errInboxMessageExists makes the push transaction roll back when the
+// lookup under the counter lock finds the message already stored.
+var errInboxMessageExists = errors.New("inbox message already stored")
 
 // existingInboxMessage reports the id of the message already stored for
 // the recipient and payload uuid in lookup, if any. One with a different
@@ -374,6 +385,12 @@ func (s *PGStore) SetInboxMessageRead(
 			IsRead:    isRead,
 			Updated:   pg.Time(updated),
 		})
+		if pg.IsConstraintError(err, inboxMessageStateFK) {
+			// The cleaner removed the message between the lookup
+			// and the write; to the caller it is simply gone.
+			return ErrInboxMessageNotFound
+		}
+
 		if err != nil {
 			return fmt.Errorf("set inbox message read state: %w", err)
 		}
@@ -407,6 +424,10 @@ func (s *PGStore) HideInboxMessage(
 			Subject:   reader.Subject,
 			Updated:   pg.Time(updated),
 		})
+		if pg.IsConstraintError(err, inboxMessageStateFK) {
+			return ErrInboxMessageNotFound
+		}
+
 		if err != nil {
 			return fmt.Errorf("hide inbox message: %w", err)
 		}

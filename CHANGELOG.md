@@ -48,8 +48,6 @@ Changes:
 - New NOTIFY channel `inbox_state_update`, emitted when a reader's read state
   changes or a message is hidden, with `{id, recipient, subject, created_by}`.
   Nothing consumes it yet; it is for the notification stream.
-- A failing `PollEventLog` bootstrap is reported as `get latest event log id`
-  rather than `get latest message id`.
 
 ## [v1.6.0] - 2026-09-29
 

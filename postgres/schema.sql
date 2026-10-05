@@ -136,7 +136,7 @@ CREATE TABLE public.document (
 
 CREATE TABLE public.document_schema (
     name text NOT NULL,
-    version text CONSTRAINT document_schema_version_not_null1 NOT NULL,
+    version text NOT NULL,
     spec jsonb NOT NULL,
     usage public.schema_usage NOT NULL
 );

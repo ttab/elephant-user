@@ -177,7 +177,7 @@ Everything is in Postgres and Postgres is authoritative for all of it.
 
 | Table | Holds | Notes |
 |---|---|---|
-| `user` | every owner or recipient ever seen, with its kind | FK target; rows are never deleted |
+| `user` | every settings owner and system-message recipient ever seen, with its kind | FK target for `message`; inbox rows do not reference it; rows are never deleted |
 | `document`, `property` | settings state | current version only, no history |
 | `eventlog` | the change stream over documents and properties | ids from `sequence_counter`; never contains payloads |
 | `sequence_counter` | the `eventlog` and `inbox` id counters | one row each; `eventlog` must equal `MAX(eventlog.id)` after migration 004 |
@@ -439,8 +439,8 @@ Scopes and what they grant:
 
 | Scope | Grants |
 |---|---|
-| `user` | all `Settings` and `Messages` RPCs on the caller's own data; reading shared docs the caller's org or units own; pushing messages to any recipient |
-| `doc_admin` | writing settings documents owned by an org or unit the caller belongs to |
+| `user` | all `Settings` and `Messages` RPCs on the caller's own data; reading shared docs and inbox messages addressed to the caller's org or units; pushing system messages and inbox messages to a user |
+| `doc_admin` | writing settings documents owned by, and pushing inbox messages to, an org or unit the caller belongs to |
 | `schema_admin` | registering and activating config generations, toggling deprecations |
 | `schema_read` | reading generations, schemas and deprecations |
 
