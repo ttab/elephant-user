@@ -48,6 +48,8 @@ Changes:
 - New NOTIFY channel `inbox_state_update`, emitted when a reader's read state
   changes or a message is hidden, with `{id, recipient, subject, created_by}`.
   Nothing consumes it yet; it is for the notification stream.
+- Dependency upgrades: elephant-api to v0.28.0, the release carrying the inbox
+  fields.
 
 ## [v1.6.0] - 2026-09-29
 
