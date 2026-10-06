@@ -20,6 +20,7 @@ type NotifyChannel = string
 const (
 	NotifyChannelMessageUpdate      NotifyChannel = "message_update"
 	NotifyChannelInboxMessageUpdate NotifyChannel = "inbox_message_update"
+	NotifyChannelInboxStateUpdate   NotifyChannel = "inbox_state_update"
 	NotifyChannelEventLogUpdate     NotifyChannel = "event_log_update"
 	NotifyChannelSchemaUpdate       NotifyChannel = "schema_update"
 	NotifyChannelDeprecationUpdate  NotifyChannel = "deprecation_update"
@@ -32,6 +33,7 @@ type PGStore struct {
 
 	Messages      *pg.FanOut[MessageEvent]
 	InboxMessages *pg.FanOut[MessageEvent]
+	InboxStates   *pg.FanOut[InboxStateEvent]
 	EventLog      *pg.FanOut[EventLogEvent]
 	Schemas       *pg.FanOut[SchemaEvent]
 	Deprecations  *pg.FanOut[DeprecationEvent]
@@ -47,6 +49,7 @@ func NewPGStore(
 
 		Messages:      pg.NewFanOut[MessageEvent](NotifyChannelMessageUpdate),
 		InboxMessages: pg.NewFanOut[MessageEvent](NotifyChannelInboxMessageUpdate),
+		InboxStates:   pg.NewFanOut[InboxStateEvent](NotifyChannelInboxStateUpdate),
 		EventLog:      pg.NewFanOut[EventLogEvent](NotifyChannelEventLogUpdate),
 		Schemas:       pg.NewFanOut[SchemaEvent](NotifyChannelSchemaUpdate),
 		Deprecations:  pg.NewFanOut[DeprecationEvent](NotifyChannelDeprecationUpdate),
@@ -63,6 +66,7 @@ func (s *PGStore) NewSubscriber(
 	return pg.NewSubscriber(s.logger, pool, []pg.ChannelSubscription{
 		s.Messages,
 		s.InboxMessages,
+		s.InboxStates,
 		s.EventLog,
 		s.Schemas,
 		s.Deprecations,

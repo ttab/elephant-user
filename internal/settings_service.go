@@ -6,7 +6,6 @@ import (
 	"errors"
 	"time"
 
-	"github.com/google/uuid"
 	newsdoc_rpc "github.com/ttab/elephant-api/newsdoc"
 	"github.com/ttab/elephant-api/user"
 	"github.com/ttab/elephant-user/postgres"
@@ -28,7 +27,7 @@ type SettingsStore interface {
 	) error
 	DeleteDocument(
 		ctx context.Context, owner string, application string,
-		docType string, key string,
+		docType string, key string, updatedBy string,
 	) error
 	GetProperties(
 		ctx context.Context, owner string,
@@ -205,9 +204,6 @@ func (s *SettingsService) UpdateDocument(
 
 	newsdoc := newsdoc_rpc.DocumentFromRPC(req.Payload)
 
-	// Add nil uuid.UUID to satisfy the validator.
-	newsdoc.UUID = uuid.UUID{}.String()
-
 	validationResult, err := s.validator.ValidateDocument(
 		ctx, postgres.SchemaUsageSettings, &newsdoc)
 	if err != nil {
@@ -266,7 +262,10 @@ func (s *SettingsService) DeleteDocument(
 		targetOwner = req.Owner
 	}
 
-	err = s.store.DeleteDocument(ctx, targetOwner, req.Application, req.Type, req.Key)
+	err = s.store.DeleteDocument(
+		ctx, targetOwner, req.Application, req.Type, req.Key,
+		auth.Claims.Subject,
+	)
 	if err != nil {
 		return nil, rpc.Internalf("delete document: %w", err)
 	}
@@ -373,13 +372,13 @@ func (s *SettingsService) PollEventLog(
 		ctx, notifications, owners, req.AfterId,
 	)
 
-	limit := int64(10)
+	limit := clampSize(req.Size)
 
 	if req.AfterId == -1 {
 		latestID, err := s.store.GetLatestEventLogID(ctx, owners)
 		if err != nil {
 			return nil, rpc.Internalf(
-				"get latest message id: %w", err)
+				"get latest event log id: %w", err)
 		}
 
 		req.AfterId = latestID

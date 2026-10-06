@@ -28,6 +28,8 @@ and run it, and what every configuration flag does. The design lives in
 | [`docs/architecture.md`](docs/architecture.md) | How the service is built: the process model, the write and long-poll paths, id assignment, schemas and config generations, the RPC surface and scopes. Start here to understand the system. |
 | [`docs/ops.md`](docs/ops.md) | The operator's-eye view: dependencies, deployment shape, data flows, the bootstrap order, migrations, and the failure modes with the signal that shows each one. |
 | [`docs/observability.md`](docs/observability.md) | Every metric the service exports and what a change in it means. |
+| [`CONTEXT.md`](CONTEXT.md) | What the words mean: owner, recipient, reader, broadcast, read state, and where a term narrows the platform's. |
+| [`docs/adr/`](docs/adr/0001-inbox-shared-row-with-per-reader-state.md) | Why a decision went the way it did, and what must not be reintroduced. |
 | [`CHANGELOG.md`](CHANGELOG.md) | What each release changed for a consumer, with the deploy procedure where one is needed. |
 
 The documents link to each other by heading, and a renamed heading otherwise
@@ -178,13 +180,6 @@ Provided by elephantine's `AuthenticationCLIFlags`.
 error vocabulary. Step 3 of elephantine's `docs/migration-service.md`, dropping
 the `/twirp/` mount, waits for the next major release and for
 `rpc_protocol_responses_total{protocol="twirp"}` to reach zero.
-
-**Inbox to orgs and units.** Messages are stored and delivered per recipient
-`sub`; a message addressed to a unit or org is stored and reaches nobody. The
-redesign — one shared row per broadcast, a per-reader read-state table, a
-global inbox id from `sequence_counter` so one cursor spans a reader's whole
-owner set, and an idempotent push keyed on the payload's document uuid — is
-decided but not started, and nothing depends on the inbox API today.
 
 **Notifications over a websocket.** The long-poll transports (`PollMessages`,
 `PollInboxMessages`, `PollEventLog`) are meant to be replaced by a websocket

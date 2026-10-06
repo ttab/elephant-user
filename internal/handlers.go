@@ -64,3 +64,22 @@ func unmarshalDocument(raw json.RawMessage) (*newsdoc_rpc.Document, error) {
 
 	return &doc, nil
 }
+
+const (
+	// pollDefaultSize is how many items a poll or list returns when the
+	// request does not say.
+	pollDefaultSize = 10
+	// pollMaxSize caps what a poll or list returns in one response. A
+	// request over the cap is served the cap, as the repository's
+	// eventlog does.
+	pollMaxSize = 100
+)
+
+// clampSize applies the default and the ceiling to a requested page size.
+func clampSize(size int64) int64 {
+	if size <= 0 {
+		return pollDefaultSize
+	}
+
+	return min(size, pollMaxSize)
+}

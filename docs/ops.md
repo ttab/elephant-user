@@ -12,6 +12,8 @@ signal that shows each one. It does not explain how the code is built
 | [`../README.md`](../README.md) | What the repository holds, how to build and run it, every configuration flag. |
 | [`architecture.md`](architecture.md) | How the service is built: process model, data flow, subsystems, RPC surface and scopes. |
 | [`observability.md`](observability.md) | Every metric the service exports and what a change in it means. |
+| [`../CONTEXT.md`](../CONTEXT.md) | What the words mean: the service's own vocabulary. |
+| [`adr/`](adr/0001-inbox-shared-row-with-per-reader-state.md) | Why a decision went the way it did, and what must not be reintroduced. |
 
 ## What the service is
 
@@ -112,20 +114,27 @@ lost notification costs one 30-second wait and nothing else.
 ### 2. An inbox push
 
 ```
-BFF / service token ── PushInboxMessage ──► replica
-                                              │ scope user; validate against the messages schema
+sender ── PushInboxMessage(recipient, payload) ──► replica
+                                              │ scope user; unit/org recipient: doc_admin + membership
+                                              │ validate against the messages schema
+                                              │ SELECT id FROM inbox_message WHERE (recipient, uuid)   ← retry? answer that id
                                               │ BEGIN
-                                              │   upsert recipient into user
-                                              │   INSERT message_write_lock ... ON CONFLICT DO UPDATE +1 RETURNING  ← per-recipient lock
-                                              │   INSERT inbox_message (recipient, id, payload)
+                                              │   UPDATE sequence_counter ... WHERE name = 'inbox' RETURNING  ← the only lock
+                                              │   SELECT ... WHERE (recipient, uuid)                  ← lost a race? answer that id
+                                              │   INSERT inbox_message (id, uuid, recipient, payload)
                                               │   pg_notify('inbox_message_update', {id, recipient})
                                               │ COMMIT
+                                              ▼
+                                   every replica: PollInboxMessages handlers whose
+                                   owner set (sub, org, units) contains recipient
 ```
 
-Ids are per recipient, so a burst to many recipients does not contend. A
-retried push after a timeout is a duplicate — there is no idempotency key —
-which matters for durable inbox messages and not for ephemeral system
-messages.
+Every push serialises on the one counter row, which is what makes the
+`(recipient, uuid)` check race-free and the ids commit-ordered across all
+recipients. A retried push after a lost response is answered with the
+existing message; the same uuid with a different payload is refused. A read
+or delete by one member writes that member's `inbox_message_state` row and
+emits `inbox_state_update`, which no handler consumes yet.
 
 ### 3. Schema activation
 
@@ -168,12 +177,14 @@ Everything is in Postgres and Postgres is authoritative for all of it.
 
 | Table | Holds | Notes |
 |---|---|---|
-| `user` | every owner or recipient ever seen, with its kind | FK target; rows are never deleted |
+| `user` | every settings owner and system-message recipient ever seen, with its kind | FK target for `message`; inbox rows do not reference it; rows are never deleted |
 | `document`, `property` | settings state | current version only, no history |
 | `eventlog` | the change stream over documents and properties | ids from `sequence_counter`; never contains payloads |
-| `sequence_counter` | the `eventlog` id counter | one row; must equal `MAX(eventlog.id)` after migration |
-| `message`, `inbox_message` | messages by `(recipient, id)` | retention 2 weeks / 6 months |
-| `message_write_lock` | per-recipient id counters | never cleaned |
+| `sequence_counter` | the `eventlog` and `inbox` id counters | one row each; `eventlog` must equal `MAX(eventlog.id)` after migration 004 |
+| `message` | system messages by `(recipient, id)` | retention 2 weeks |
+| `inbox_message` | one row per inbox message, `id` global, unique `(recipient, uuid)` | retention 6 months |
+| `inbox_message_state` | one reader's `is_read`/`hidden` per message | absent means unread and visible; cascades with the message |
+| `message_write_lock` | per-recipient id counters for `message` | never cleaned |
 | `document_schema`, `config_generation`, `config_generation_schema`, `deprecation` | schema configuration | exactly one generation is active |
 | `job_lock` | the cleaner lock | rows are transient |
 | `schema_version` | tern's migration marker | |
@@ -212,6 +223,22 @@ id). The migration takes the table lock before seeding, so it cannot happen
 when nothing is writing; the check is belt and braces. Rollback (`mage
 sql:rollback 3` locally, the platform equivalent hosted) needs a window for
 the same reason. Rehearse both directions on staging in one session.
+
+`schema/005_inbox_broadcast.sql` (v1.7.0) drops and recreates `inbox_message`
+with a global id and a `(recipient, uuid)` key, adds `inbox_message_state`,
+seeds `sequence_counter('inbox')` at 0 and removes the inbox rows from
+`message_write_lock`. **Every existing inbox row is discarded**: the old
+per-recipient ids cannot be renumbered into one id space without inventing
+an order, and the inbox has had no callers. Before running it in production:
+
+```
+SELECT count(*) FROM inbox_message;                    -- expected 0
+```
+
+A non-zero count is a conversation, not a blocker, since nothing reads
+those rows. Run the migration before the deploy; no service window is
+needed because no caller is affected, but old code cannot write the new
+table, so do not deploy first. Rollback recreates the old table, empty.
 
 The `job_lock` table is elephantine's; `schema/vendor.json` declares that and
 `001_messages.sql` asserts it created the table by hand
@@ -412,8 +439,8 @@ Scopes and what they grant:
 
 | Scope | Grants |
 |---|---|
-| `user` | all `Settings` and `Messages` RPCs on the caller's own data; reading shared docs the caller's org or units own; pushing messages to any recipient |
-| `doc_admin` | writing settings documents owned by an org or unit the caller belongs to |
+| `user` | all `Settings` and `Messages` RPCs on the caller's own data; reading shared docs and inbox messages addressed to the caller's org or units; pushing system messages and inbox messages to a user |
+| `doc_admin` | writing settings documents owned by, and pushing inbox messages to, an org or unit the caller belongs to |
 | `schema_admin` | registering and activating config generations, toggling deprecations |
 | `schema_read` | reading generations, schemas and deprecations |
 
@@ -431,8 +458,12 @@ unauthenticated and internal only.
 
 ## Not in place yet
 
-- **No idempotency on pushes.** A retried `PushInboxMessage` duplicates.
-  Planned with the inbox redesign.
+- **A retried `PushMessage` duplicates.** System messages carry no identity
+  a retry could be matched on; the RPC is frozen and goes away with the
+  notification stream. `PushInboxMessage` is idempotent on the payload uuid.
+- **Another tab does not see a read-state change until it re-lists.**
+  `inbox_state_update` is emitted but nothing delivers it to clients yet;
+  that is the notification stream's job.
 - **Twirp is still served.** The `/twirp/` mount goes in the next major
   release, once `rpc_protocol_responses_total{protocol="twirp"}` is zero for
   every method and the remaining `client_id`s have been told.

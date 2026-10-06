@@ -9,6 +9,8 @@ with the scopes that guard it. Start here before changing the service.
 | [`../README.md`](../README.md) | What the repository holds, how to build and run it, every configuration flag. |
 | [`ops.md`](ops.md) | Dependencies, deployment shape, bootstrap order, failure modes and their signals. |
 | [`observability.md`](observability.md) | Every metric the service exports and what a change in it means. |
+| [`../CONTEXT.md`](../CONTEXT.md) | What the words mean: the service's own vocabulary. |
+| [`adr/`](adr/0001-inbox-shared-row-with-per-reader-state.md) | Why a decision went the way it did, and what must not be reintroduced. |
 
 This document does not say what to do when something breaks (that is
 `ops.md`) or what a metric means (`observability.md`). It links to the code
@@ -30,7 +32,7 @@ main.go
               behind a bouncer (LISTEN + one spare), else the same pool as Main
   auth        = OIDC discovery + JWKS from OIDC_CONFIG
   metrics     = internal.NewMetrics(DefaultRegisterer)
-  store       = internal.NewPGStore(pools.Main)   FanOuts for the five NOTIFY channels
+  store       = internal.NewPGStore(pools.Main)   FanOuts for the six NOTIFY channels
   validator   = internal.NewValidator(store)        loads active schemas, or fails startup
                 └─ go reloadLoop                    NOTIFY-driven, 5 min recheck
   subscriber  = store.NewSubscriber(pools.PubSub) one LISTEN connection, feeds the FanOuts
@@ -166,8 +168,15 @@ delivered. Two mechanisms, same principle:
   committed after id 10 is visible, and a rollback hands the number back.
   `created` is stamped after the counter is taken, so timestamp order matches
   id order too.
-- **Message ids** are per recipient, from `message_write_lock`: one atomic
-  `INSERT ... ON CONFLICT DO UPDATE SET current_message_id = current + 1
+- **Inbox message ids** come from the same counter table, row `inbox`
+  (`schema/005_inbox_broadcast.sql`): one commit-ordered id space across every
+  recipient, which is what lets a reader tail their sub, org and units with a
+  single `after_id`. Per-recipient sequences cannot compose into one cursor.
+  The push takes the counter first and locks nothing else, so the
+  tail-of-transaction rule below does not apply to it; see
+  [Inbox messages](#inbox-messages).
+- **System message ids** are per recipient, from `message_write_lock`: one
+  atomic `INSERT ... ON CONFLICT DO UPDATE SET current_message_id = current + 1
   RETURNING`, which creates the row on first use and row-locks it for the
   rest of the transaction (`nextMessageID`, `internal/messages_store.go`). Gapless and
   commit-ordered per recipient. The retention cleaner leaves the lock rows
@@ -201,22 +210,54 @@ fails on either ordering mistake.
 
 ### Inbox messages
 
-Durable, per-recipient newsdoc documents with an `is_read` flag, six months of
-retention. `PushInboxMessage` requires the `user` scope, a `recipient` and a
-payload that validates against the `messages` validator; the caller's `sub`
-is recorded as `created_by`, so a sender cannot impersonate anyone. Any
-`user`-scoped token can push to any recipient. The write is one transaction:
-upsert the recipient into `user`, take the next id from the recipient's lock
-row, insert, `pg_notify('inbox_message_update')`.
+Durable newsdoc documents addressed to a user, a unit (`core://unit/<id>`)
+or an org (`core://org/<id>`), six months of retention. **A message is one
+row whatever it is addressed to, and each reader's state lives beside it**:
+`inbox_message` holds the message, `inbox_message_state(message_id, subject)`
+holds one reader's `is_read` and `hidden` flags, absent until the reader
+touches the message. There is no membership directory, so a unit broadcast
+is never fanned out to its members; it is matched against each reader's
+claims at read time, exactly as shared settings documents are
+([ADR-0001](adr/0001-inbox-shared-row-with-per-reader-state.md)).
 
-Reads are for the caller only: `PollInboxMessages(after_id)` (same shape as
-`PollEventLog`, recipient = `sub`, limit 10), `ListInboxMessages(before_id,
-size)` (keyset pagination on `id DESC`, default 10, `size` uncapped),
-`UpdateInboxMessage(id, is_read)` and `DeleteInboxMessage(id)`. A message
-pushed to `core://unit/x` is stored but delivered to nobody — delivery is by
-the token's `sub` only. The inbox API has no production callers today; its
-data model is free to change, and the plan to make it org- and unit-addressed
-is the next feature workstream.
+`PushInboxMessage` requires the `user` scope and a payload that validates
+against the `messages` validator; a unit or org recipient additionally
+requires `doc_admin` and membership of the target, the shared-write rule
+`UpdateDocument` applies to a document owned by a unit or org. `created_by`
+is the token's `sub`. The payload document's `uuid` identifies the message
+per recipient: `(recipient, uuid)` is unique, a push whose pair exists with
+the same payload answers with the existing id and stores nothing, and one
+whose stored payload differs is `already_exists`. That is what makes a
+retry after a lost response safe. The push first looks the uuid up outside
+any transaction, which answers the common retry without touching the counter.
+Then one transaction: take the next id from `sequence_counter('inbox')`, look
+the uuid up again under the counter lock, insert, `pg_notify('inbox_message_update',
+{id, recipient})`, and answer with the id; if the second lookup finds the
+message after all, the transaction rolls back so the reserved id is handed
+back. The counter is the first and only lock the push takes, so pushes
+serialise on it and the uuid check cannot race another push of the same
+document; because the push locks no data row, it cannot deadlock against the
+eventlog writers either.
+
+Reads span the caller's owner set, `sub` + `org` + `units`, the same
+`getAllOwners` list `PollEventLog` uses: `PollInboxMessages(after_id, size)`
+and `ListInboxMessages(before_id, size)` select `recipient = ANY(owners)`,
+left-join the caller's state row, drop what the caller has hidden and report
+`is_read` from the state row (false when absent). `size` defaults to 10 and
+is clamped to 100. Each message names the recipient it was addressed to, so
+a client can show "to your unit". `updated` is message-level and equals
+`created`, since messages are never changed after creation.
+
+`UpdateInboxMessage(id, is_read)` upserts the caller's state row and
+`DeleteInboxMessage(id)` sets `hidden` on it: a delete hides the message for
+the caller and leaves it for every other reader. Both first check that the
+message is addressed to one of the caller's owners and answer `not_found`
+otherwise, so an id in somebody else's inbox is indistinguishable from a
+missing one. Both emit `pg_notify('inbox_state_update', {id, recipient,
+subject, created_by})`, which nothing in this service consumes yet; it is
+there for the notification stream that will, and a tab that wants another
+tab's read state meanwhile re-lists on focus. The six-month cleaner deletes
+the message row and the state rows cascade.
 
 ### System messages
 
@@ -244,13 +285,14 @@ elephantine's `docs/joblock-restart-semantics.md`.
 
 ## Real-time plumbing
 
-Five Postgres NOTIFY channels, one `pg.FanOut` each on `PGStore`, one LISTEN
+Six Postgres NOTIFY channels, one `pg.FanOut` each on `PGStore`, one LISTEN
 connection per replica (`pg.Subscriber` on the direct pool):
 
 | Channel | Published by | Woken consumers |
 |---|---|---|
 | `message_update` | `InsertMessage` | `PollMessages` handlers for that recipient |
-| `inbox_message_update` | `InsertInboxMessage` | `PollInboxMessages` handlers for that recipient |
+| `inbox_message_update` | `InsertInboxMessage` | `PollInboxMessages` handlers whose owner set contains the recipient |
+| `inbox_state_update` | `SetInboxMessageRead`, `HideInboxMessage` | nobody yet; reserved for the notification stream |
 | `event_log_update` | every eventlog writer | `PollEventLog` handlers whose owner set contains the row's owner |
 | `schema_update` | generation activation | validator reload loop, `GetActiveConfigGeneration` long-polls |
 | `deprecation_update` | `UpdateDeprecation` | validator reload loop |
@@ -340,7 +382,7 @@ its scope explicitly — an identified caller without the scope gets
 | Service | RPCs | Scope |
 |---|---|---|
 | `Settings` | `GetDocument`, `ListDocuments`, `UpdateDocument`, `DeleteDocument`, `GetProperties`, `SetProperties`, `DeleteProperties`, `PollEventLog` | `user`; writing a document owned by an org or unit also needs `doc_admin` and membership |
-| `Messages` | `PushMessage`, `PollMessages`, `PushInboxMessage`, `PollInboxMessages`, `ListInboxMessages`, `UpdateInboxMessage`, `DeleteInboxMessage` | `user` |
+| `Messages` | `PushMessage`, `PollMessages`, `PushInboxMessage`, `PollInboxMessages`, `ListInboxMessages`, `UpdateInboxMessage`, `DeleteInboxMessage` | `user`; `PushInboxMessage` to a unit or org also `doc_admin` + membership |
 | `Configuration` | `RegisterConfigGeneration`, `ActivateConfigGeneration`, `UpdateDeprecation` | `schema_admin` |
 | `Configuration` | `GetActiveConfigGeneration`, `ListConfigGenerations`, `GetSchema`, `GetDeprecations` | `schema_admin` or `schema_read` |
 

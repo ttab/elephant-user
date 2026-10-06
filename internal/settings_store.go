@@ -176,9 +176,11 @@ func (s *PGStore) UpdateDocument(
 	})
 }
 
+// DeleteDocument implements [SettingsStore]. The delete event records
+// updatedBy, the acting user, which for a shared document is not the owner.
 func (s *PGStore) DeleteDocument(
 	ctx context.Context, owner string, application string,
-	docType string, key string,
+	docType string, key string, updatedBy string,
 ) error {
 	return pg.WithTX(ctx, s.dbpool, func(tx pgx.Tx) error {
 		q := postgres.New(tx)
@@ -203,7 +205,7 @@ func (s *PGStore) DeleteDocument(
 			Application:  application,
 			DocumentType: pg.Text(docType),
 			Key:          key,
-			UpdatedBy:    owner,
+			UpdatedBy:    updatedBy,
 			Payload:      nil,
 		})
 		if err != nil {

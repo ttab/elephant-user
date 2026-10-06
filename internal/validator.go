@@ -159,8 +159,18 @@ func (v *Validator) ValidateDocument(
 		return nil, fmt.Errorf("no active schema for usage %q", usage)
 	}
 
-	res, err := val.ValidateDocument(ctx, doc,
-		revisor.WithDeprecationHandler(v.deprecationHandler))
+	opts := []revisor.ValidationOptionFunc{
+		revisor.WithDeprecationHandler(v.deprecationHandler),
+	}
+
+	// Settings documents are identified by owner, application, type and
+	// key and carry no uuid of their own; one that is set still has to be
+	// valid.
+	if usage == postgres.SchemaUsageSettings {
+		opts = append(opts, revisor.WithOptionalDocumentUUID())
+	}
+
+	res, err := val.ValidateDocument(ctx, doc, opts...)
 	if err != nil {
 		return nil, fmt.Errorf("validate document: %w", err)
 	}

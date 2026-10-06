@@ -8,6 +8,7 @@ import (
 	"database/sql/driver"
 	"fmt"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
@@ -237,13 +238,20 @@ type Eventlog struct {
 }
 
 type InboxMessage struct {
-	Recipient string
 	ID        int64
+	UUID      uuid.UUID
+	Recipient string
 	Created   pgtype.Timestamptz
 	CreatedBy string
-	Updated   pgtype.Timestamptz
-	IsRead    bool
 	Payload   []byte
+}
+
+type InboxMessageState struct {
+	MessageID int64
+	Subject   string
+	IsRead    bool
+	Hidden    bool
+	Updated   pgtype.Timestamptz
 }
 
 type JobLock struct {

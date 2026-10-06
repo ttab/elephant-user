@@ -1,23 +1,64 @@
 -- name: GetLatestInboxMessageId :one
 SELECT COALESCE(MAX(id), 0)::bigint AS latest_id
 FROM inbox_message
-WHERE recipient = @recipient;
+WHERE recipient = ANY(@owners::text[]);
 
 -- name: ListInboxMessagesBeforeId :many
-SELECT recipient, id, created, created_by, updated, is_read, payload
-FROM inbox_message
-WHERE recipient = @recipient
-      AND (@before_id::bigint = 0 OR id < @before_id)
-ORDER BY id DESC
+SELECT m.id, m.uuid, m.recipient, m.created, m.created_by, m.payload,
+       COALESCE(s.is_read, false)::bool AS is_read
+FROM inbox_message AS m
+     LEFT JOIN inbox_message_state AS s
+       ON s.message_id = m.id AND s.subject = @subject
+WHERE m.recipient = ANY(@owners::text[])
+      AND (@before_id::bigint = 0 OR m.id < @before_id)
+      AND NOT COALESCE(s.hidden, false)
+ORDER BY m.id DESC
 LIMIT sqlc.arg('limit')::bigint;
 
 -- name: ListInboxMessagesAfterId :many
-SELECT recipient, id, created, created_by, updated, is_read, payload
+SELECT m.id, m.uuid, m.recipient, m.created, m.created_by, m.payload,
+       COALESCE(s.is_read, false)::bool AS is_read
+FROM inbox_message AS m
+     LEFT JOIN inbox_message_state AS s
+       ON s.message_id = m.id AND s.subject = @subject
+WHERE m.recipient = ANY(@owners::text[])
+      AND m.id > @after_id
+      AND NOT COALESCE(s.hidden, false)
+ORDER BY m.id ASC
+LIMIT sqlc.arg('limit')::bigint;
+
+-- name: GetInboxMessageByUUID :one
+SELECT id, (payload = @payload::jsonb)::bool AS same_payload
 FROM inbox_message
 WHERE recipient = @recipient
-      AND id > @after_id
-ORDER BY id ASC
-LIMIT sqlc.arg('limit')::bigint;
+      AND uuid = @uuid;
+
+-- name: InsertInboxMessage :exec
+INSERT INTO inbox_message(
+      id, uuid, recipient, created, created_by, payload
+) VALUES (
+      @id, @uuid, @recipient, @created, @created_by, @payload
+);
+
+-- name: GetInboxMessageForReader :one
+SELECT id, recipient, created_by
+FROM inbox_message
+WHERE id = @id
+      AND recipient = ANY(@owners::text[]);
+
+-- name: SetInboxMessageRead :exec
+INSERT INTO inbox_message_state (message_id, subject, is_read, hidden, updated)
+VALUES (@message_id, @subject, @is_read, false, @updated)
+ON CONFLICT (message_id, subject) DO UPDATE
+SET is_read = EXCLUDED.is_read,
+    updated = EXCLUDED.updated;
+
+-- name: HideInboxMessage :exec
+INSERT INTO inbox_message_state (message_id, subject, is_read, hidden, updated)
+VALUES (@message_id, @subject, false, true, @updated)
+ON CONFLICT (message_id, subject) DO UPDATE
+SET hidden = true,
+    updated = EXCLUDED.updated;
 
 -- name: GetLatestMessageId :one
 SELECT COALESCE(MAX(id), 0)::bigint AS latest_id
@@ -49,13 +90,6 @@ SET value = value + @count::bigint
 WHERE name = @name
 RETURNING value;
 
--- name: InsertInboxMessage :exec
-INSERT INTO inbox_message(
-      recipient, id, created, created_by, updated, is_read, payload
-) VALUES (
-      @recipient, @id, @created, @created_by, @updated, @is_read, @payload
-);
-
 -- name: InsertMessage :exec
 INSERT INTO message(
       recipient, id, type, created, created_by, doc_uuid, doc_type, payload
@@ -71,17 +105,6 @@ INSERT INTO "user"(
 )
 ON CONFLICT (sub)
 DO NOTHING;
-
--- name: UpdateInboxMessage :exec
-UPDATE inbox_message
-SET is_read = @is_read
-WHERE recipient = @recipient
-      AND id = @id;
-
--- name: DeleteInboxMessage :exec
-DELETE FROM inbox_message
-WHERE recipient = @recipient
-      AND id = @id;
 
 -- name: Notify :exec
 SELECT pg_notify(@channel::text, @message::text);
