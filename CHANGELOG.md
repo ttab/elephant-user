@@ -4,7 +4,7 @@ All notable changes to elephant-user from v1.0.0 onwards are documented here.
 Entries are derived from the release tags; the linked pull requests hold the
 detail. Earlier history is not reconstructed.
 
-## [v1.7.0] - Unreleased
+## [v1.7.0] - 2026-10-07
 
 **Breaking (inbox API):** inbox messages can be addressed to a unit or an
 org, and a reader sees everything addressed to their sub, org and units.
@@ -49,7 +49,7 @@ Changes:
   changes or a message is hidden, with `{id, recipient, subject, created_by}`.
   Nothing consumes it yet; it is for the notification stream.
 - Dependency upgrades: elephant-api to v0.28.0, the release carrying the inbox
-  fields.
+  fields, and `urfave/cli` to v3.14.0.
 
 ## [v1.6.0] - 2026-09-29
 
