@@ -54,6 +54,21 @@
       "attributes": {
         "title": {}
       },
+      "meta": [
+        {
+          "name": "Title display",
+          "description": "Whether the wire list shows headlines in full.",
+          "declares": {
+            "type": "core/wire-title-display"
+          },
+          "maxCount": 1,
+          "data": {
+            "full": {
+              "enum": ["true", "false"]
+            }
+          }
+        }
+      ],
       "content": [
         {
           "name": "Wire pane",
