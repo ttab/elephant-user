@@ -108,7 +108,7 @@ func TestConfiguration(t *testing.T) {
 			Schemas: []*user.ConfigGenerationSchema{
 				{
 					Name:    "se.ecms.user.settings",
-					Version: "v1.0.0",
+					Version: "v1.1.0",
 					Usage:   user.SchemaUsage_SCHEMA_USAGE_SETTINGS,
 				},
 				{
@@ -202,7 +202,7 @@ func TestConfiguration(t *testing.T) {
 			Schemas: []*user.ConfigGenerationSchema{
 				{
 					Name:    "se.ecms.user.settings",
-					Version: "v1.0.0",
+					Version: "v1.1.0",
 					Spec:    extraSettingsSpec,
 					Usage:   user.SchemaUsage_SCHEMA_USAGE_SETTINGS,
 				},
@@ -227,12 +227,12 @@ func TestConfiguration(t *testing.T) {
 			Schemas: []*user.ConfigGenerationSchema{
 				{
 					Name:    "se.ecms.user.settings",
-					Version: "v1.0.0",
+					Version: "v1.1.0",
 					Usage:   user.SchemaUsage_SCHEMA_USAGE_SETTINGS,
 				},
 				{
 					Name:    "se.ecms.user.settings",
-					Version: "v1.0.0",
+					Version: "v1.1.0",
 					Usage:   user.SchemaUsage_SCHEMA_USAGE_SETTINGS,
 				},
 			},
@@ -321,7 +321,7 @@ func TestConfiguration(t *testing.T) {
 		})
 	test.Mustf(t, err, "get active settings schema")
 
-	if schemaRes.Version != "v1.0.0" ||
+	if schemaRes.Version != "v1.1.0" ||
 		schemaRes.Usage != user.SchemaUsage_SCHEMA_USAGE_SETTINGS {
 		t.Fatalf("unexpected version %q or usage %q for settings schema",
 			schemaRes.Version, schemaRes.Usage)
@@ -363,7 +363,7 @@ func TestConfiguration(t *testing.T) {
 			Schemas: []*user.ConfigGenerationSchema{
 				{
 					Name:    "se.ecms.user.settings",
-					Version: "v1.0.0",
+					Version: "v1.1.0",
 					Usage:   user.SchemaUsage_SCHEMA_USAGE_SETTINGS,
 				},
 				{

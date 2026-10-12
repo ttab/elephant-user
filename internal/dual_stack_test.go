@@ -358,7 +358,7 @@ func TestDualStackErrorParity(t *testing.T) {
 			Schemas: []*user.ConfigGenerationSchema{
 				{
 					Name:    "se.ecms.user.settings",
-					Version: "v1.0.0",
+					Version: "v1.1.0",
 					Usage:   user.SchemaUsage_SCHEMA_USAGE_SETTINGS,
 				},
 				{

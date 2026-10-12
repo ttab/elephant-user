@@ -32,7 +32,7 @@ func EmbeddedConfigSchemas() []ConfigSchema {
 	return []ConfigSchema{
 		{
 			Name:    "se.ecms.user.settings",
-			Version: "v1.0.0",
+			Version: "v1.1.0",
 			Spec:    schemaSettings,
 			Usage:   postgres.SchemaUsageSettings,
 		},

@@ -64,7 +64,7 @@
           "maxCount": 1,
           "data": {
             "full": {
-              "enum": ["true", "false"]
+              "format": "bool"
             }
           }
         }
