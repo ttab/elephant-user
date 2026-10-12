@@ -255,8 +255,9 @@ this service has not taken.
    green with `schemas` reported as failing.
 4. Register and activate the initial generation with a `schema_admin` token:
    `RegisterConfigGeneration` with the two seed schemas
-   `se.ecms.user.settings@v1.0.0` and `se.ecms.user.messages@v1.0.0` (the
-   specs are the embedded files in `internal/`) and `activate: true`. See
+   `se.ecms.user.settings@v1.1.0` and `se.ecms.user.messages@v1.0.0` (the
+   versions are in `EmbeddedConfigSchemas`, the specs are the embedded files in
+   `internal/`) and `activate: true`. See
    [Common operations](#common-operations).
 5. Route traffic.
 
@@ -417,6 +418,20 @@ curl -sS -X POST "$USER_API/twirp/elephant.user.Configuration/RegisterConfigGene
 
 Registering the same set again returns the existing generation; it is safe to
 re-run.
+
+**Change a registered schema.** A schema is immutable per name and version:
+registering a different spec under an existing pair is refused as
+`invalid_argument` (schema mismatch). So an edit to an embedded file comes
+with a version bump in `EmbeddedConfigSchemas`, and the release notes say
+which schema moved. After deploying that release, register a generation that
+lists every schema the new one should cover: the changed schema with its new
+version and its spec, and each unchanged schema by name and version only (a
+stored schema needs no spec). Activate it, or `ActivateConfigGeneration`
+afterwards. Documents are validated against the active generation on write
+only; a document's own `schema_version` is the client's label and is not
+checked, so existing documents are unaffected until they are next written.
+Until the new generation is active, writes that need the new declarations are
+refused as validation errors.
 
 **See what is active.** `GetActiveConfigGeneration` with an empty request
 (`schema_read` suffices); `ListConfigGenerations` for the history.

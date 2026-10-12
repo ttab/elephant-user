@@ -4,6 +4,25 @@ All notable changes to elephant-user from v1.0.0 onwards are documented here.
 Entries are derived from the release tags; the linked pull requests hold the
 detail. Earlier history is not reconstructed.
 
+## [v1.8.0] - Unreleased
+
+**Behaviour change (settings schema):** the embedded settings schema is now
+`se.ecms.user.settings@v1.1.0`, declaring a `core/wire-title-display` meta
+block on `core/wire-panes-setting` with `data.full` as a boolean string. A
+panes document carrying that block was refused as undeclared and is accepted
+once the new schema is active. Registered schemas are immutable per name and
+version, so after the deploy register a generation with
+`se.ecms.user.settings@v1.1.0` and the existing
+`se.ecms.user.messages@v1.0.0` and activate it; see "Change a registered
+schema" in `docs/ops.md`. Until then the service keeps validating against the
+generation that is active, and chrome cannot save the title display toggle.
+
+Changes:
+
+- `core/wire-panes-setting` accepts one `core/wire-title-display` meta block
+  with `data.full` set to `"true"` or `"false"`, for chrome's full-headline
+  toggle on the wire list. (#92)
+
 ## [v1.7.0] - 2026-10-07
 
 **Breaking (inbox API):** inbox messages can be addressed to a unit or an
