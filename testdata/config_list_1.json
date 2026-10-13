@@ -9,7 +9,7 @@
       "schemas": [
         {
           "name": "se.ecms.user.settings",
-          "version": "v1.0.0",
+          "version": "v1.1.0",
           "usage": "SCHEMA_USAGE_SETTINGS"
         },
         {
@@ -32,7 +32,7 @@
       "schemas": [
         {
           "name": "se.ecms.user.settings",
-          "version": "v1.0.0",
+          "version": "v1.1.0",
           "usage": "SCHEMA_USAGE_SETTINGS"
         },
         {
