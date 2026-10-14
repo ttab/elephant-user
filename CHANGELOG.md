@@ -4,7 +4,7 @@ All notable changes to elephant-user from v1.0.0 onwards are documented here.
 Entries are derived from the release tags; the linked pull requests hold the
 detail. Earlier history is not reconstructed.
 
-## [v1.8.0] - Unreleased
+## [v1.8.0] - 2026-10-14
 
 **Behaviour change (settings schema):** the embedded settings schema is now
 `se.ecms.user.settings@v1.1.0`, declaring a `core/wire-title-display` meta
