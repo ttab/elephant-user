@@ -12,7 +12,7 @@ require (
 	github.com/ttab/elephant-api v0.28.0
 	github.com/ttab/elephantine v0.30.2
 	github.com/ttab/eltest v0.5.0
-	github.com/ttab/mage v0.15.0
+	github.com/ttab/mage v0.16.1
 	github.com/ttab/newsdoc v1.1.0
 	github.com/ttab/revisor v1.0.3
 	github.com/twitchtv/twirp v8.1.3+incompatible
