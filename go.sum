@@ -232,8 +232,8 @@ github.com/ttab/elephantine v0.30.2 h1:miXp7fpOMuK6diP7aqJVKUn64u5z5ZWVkogPqORNe
 github.com/ttab/elephantine v0.30.2/go.mod h1:apiFCr8fYuljD0n3BDlbd+QrKw8DwCJx4Wlnxb5qoKM=
 github.com/ttab/eltest v0.5.0 h1:a53GK8qmEKzpZrIrkSDALsNb4S7Z1d3mSqxaOYnNrxM=
 github.com/ttab/eltest v0.5.0/go.mod h1:gJFGzMAisNpmWoMeaXrL4L74B774q+bbXBph0uuHTSI=
-github.com/ttab/mage v0.15.0 h1:f3tjDMumYg2gpLmWWNONin2bGX2cai/9O5q7WAmcDX0=
-github.com/ttab/mage v0.15.0/go.mod h1:vAkhHW8T0ueZoJ5PLRLjfhrCT8nY8rq4c5lBbwEpRlM=
+github.com/ttab/mage v0.16.1 h1:MgJMn3l8OxSp1hsLvHA9NC73QbGCX7iBR2nnFmQLiF0=
+github.com/ttab/mage v0.16.1/go.mod h1:vAkhHW8T0ueZoJ5PLRLjfhrCT8nY8rq4c5lBbwEpRlM=
 github.com/ttab/newsdoc v1.1.0 h1:sFmWByaIrjOiLKrgQ3isqINibAn91KxmWWP2DOwguZ8=
 github.com/ttab/newsdoc v1.1.0/go.mod h1:ccjzZc4rhelSUzIlqA7Og2g5LfnSmz9IblndQtnKvh8=
 github.com/ttab/revisor v1.0.3 h1:4WQZRaFcYJw79+9NLRjKmWI5M2qBRBE46OyKrlg6RdU=
