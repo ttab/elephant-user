@@ -431,7 +431,14 @@ afterwards. Documents are validated against the active generation on write
 only; a document's own `schema_version` is the client's label and is not
 checked, so existing documents are unaffected until they are next written.
 Until the new generation is active, writes that need the new declarations are
-refused as validation errors.
+refused as validation errors. Give the generation a `description` that says which
+schema moved to which version and why (`settings v1.1.0: core/wire-title-display
+meta block on wire panes`): it is set once at registration, is not part of the
+generation's identity, and the list is the only history there is. Generation ids
+are an identity column and are not dense: they differ between clusters and can
+jump by 32 after an unclean Postgres restart (sequence WAL pre-allocation), so
+always activate an id read back from `ListConfigGenerations`, never one
+remembered from another environment.
 
 **See what is active.** `GetActiveConfigGeneration` with an empty request
 (`schema_read` suffices); `ListConfigGenerations` for the history.
