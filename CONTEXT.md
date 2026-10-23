@@ -79,15 +79,9 @@ _Avoid_: Deduplication, upsert
 
 **System message**:
 An ephemeral typed key-value message to one subject, two weeks of retention,
-pushed with `PushMessage` and polled with `PollMessages`. Frozen; to be
-replaced by the notification stream.
+pushed with `PushMessage` and polled with `PollMessages`. Frozen: the
+elephant client BFF and chrome depend on the shapes.
 _Avoid_: Toast (that is what the client does with it), notification
-
-**Notification**:
-Not an inbox message. A system-emitted event about a resource, delivered by
-the planned notification stream, subscribed to rather than addressed, with no
-read state. Reserved for that work; do not use it for inbox messages.
-_Avoid_: Using it interchangeably with inbox message
 
 ### Settings
 

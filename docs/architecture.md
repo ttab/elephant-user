@@ -254,18 +254,17 @@ the caller and leaves it for every other reader. Both first check that the
 message is addressed to one of the caller's owners and answer `not_found`
 otherwise, so an id in somebody else's inbox is indistinguishable from a
 missing one. Both emit `pg_notify('inbox_state_update', {id, recipient,
-subject, created_by})`, which nothing in this service consumes yet; it is
-there for the notification stream that will, and a tab that wants another
-tab's read state meanwhile re-lists on focus. The six-month cleaner deletes
-the message row and the state rows cascade.
+subject, created_by})`, which nothing in this service consumes yet; a tab
+that wants another tab's read state re-lists on focus. The six-month cleaner
+deletes the message row and the state rows cascade.
 
 ### System messages
 
 Ephemeral key-value payloads with a two-week retention: `PushMessage(recipient,
 type, doc_uuid, doc_type, payload map)` and `PollMessages(after_id)`. No
 validation — the elephant client's BFF pushes `type: "rpc_error"` toasts and
-the clients poll them. The RPC shapes are frozen until the notification
-transport that replaces them exists; do not extend them.
+the clients poll them. The RPC shapes are frozen because those callers depend
+on them; do not extend them.
 
 ### Retention cleaner
 
@@ -292,7 +291,7 @@ connection per replica (`pg.Subscriber` on the direct pool):
 |---|---|---|
 | `message_update` | `InsertMessage` | `PollMessages` handlers for that recipient |
 | `inbox_message_update` | `InsertInboxMessage` | `PollInboxMessages` handlers whose owner set contains the recipient |
-| `inbox_state_update` | `SetInboxMessageRead`, `HideInboxMessage` | nobody yet; reserved for the notification stream |
+| `inbox_state_update` | `SetInboxMessageRead`, `HideInboxMessage` | nobody yet |
 | `event_log_update` | every eventlog writer | `PollEventLog` handlers whose owner set contains the row's owner |
 | `schema_update` | generation activation | validator reload loop, `GetActiveConfigGeneration` long-polls |
 | `deprecation_update` | `UpdateDeprecation` | validator reload loop |
