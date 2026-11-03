@@ -318,6 +318,26 @@ kind, mentioned, time}`; the first comment on a thread emits
 `thread_reopened`. The mention list is truncated to keep the payload under
 the 8000 byte NOTIFY limit, which costs nothing since readers re-read.
 
+The handlers (`internal/comments_service.go`) check access before they
+touch the store: the document a thread is on decides who may read and write
+it, with the permission per RPC in [RPC APIs](#rpc-apis). For an edit, a delete, a
+resolve or a reopen the document comes from the stored thread or comment, so
+the row is read first and the check follows. A new thread takes its document
+from the request; an existing one keeps its own, and the store is handed the
+document that was checked, so a thread created on another document in the
+meantime is refused rather than written to. After schema validation the
+handler checks that every inline `<mention id>` and `<a id>` in a text block
+is bound to a link in the same block with that id and the matching rel
+(`mention`, `see-also`), which revisor cannot express. Timestamps are RFC3339
+with fractional seconds, since `ListMentions` pages on `created`.
+
+`WaitForComments` is the interim wakeup poll: it registers the requested
+documents on the `Comments` FanOut, waits for the first event or
+`max_wait_sec` (default 10, at most 30), and answers with that document and
+any other whose event had already arrived; it does not linger to collect
+more. It has no cursor, so a change between two calls is not reported, and a
+timeout is an empty answer. A comment stream replaces it.
+
 ### Retention cleaner
 
 `RunCleaner` (`internal/store.go`) runs under `joblock.Run` with lock name
@@ -347,7 +367,7 @@ connection per replica (`pg.Subscriber` on the direct pool):
 | `event_log_update` | every eventlog writer | `PollEventLog` handlers whose owner set contains the row's owner |
 | `schema_update` | generation activation | validator reload loop, `GetActiveConfigGeneration` long-polls |
 | `deprecation_update` | `UpdateDeprecation` | validator reload loop |
-| `comment_update` | every comment and thread write | nobody yet; the `Comments` FanOut is keyed by document uuid (`OnCommentUpdate`) |
+| `comment_update` | every comment and thread write | `WaitForComments` handlers waiting on the event's document (`OnCommentUpdate`) |
 
 `pg_notify` is always issued inside the writing transaction; Postgres delivers
 it at commit and discards it on rollback. **LISTEN is a session-level command
@@ -413,8 +433,9 @@ the use into a validation error. The counters are how you learn that no
 client sends a deprecated construct any more, which is when enforcing it is
 safe.
 
-The two embedded constraint sets, `internal/se.ecms.user.settings.json` and
-`internal/se.ecms.user.messages.json`, are seed fixtures: tests register them
+The three embedded constraint sets, `internal/se.ecms.user.settings.json`,
+`internal/se.ecms.user.messages.json` and
+`internal/se.ecms.user.comments.json`, are seed fixtures: tests register them
 as generation 1, and a new environment registers them through the API. The
 service never seeds itself.
 
@@ -438,6 +459,7 @@ its scope explicitly — an identified caller without the scope gets
 |---|---|---|
 | `Settings` | `GetDocument`, `ListDocuments`, `UpdateDocument`, `DeleteDocument`, `GetProperties`, `SetProperties`, `DeleteProperties`, `PollEventLog` | `user`; writing a document owned by an org or unit also needs `doc_admin` and membership |
 | `Messages` | `PushMessage`, `PollMessages`, `PushInboxMessage`, `PollInboxMessages`, `ListInboxMessages`, `UpdateInboxMessage`, `DeleteInboxMessage` | `user`; `PushInboxMessage` to a unit or org also `doc_admin` + membership |
+| `Comments` | `CreateComment`, `UpdateComment`, `DeleteComment`, `GetThread`, `ListThreads`, `ResolveThread`, `ReopenThread`, `ListMentions`, `WaitForComments` | `user` and a document permission (below); `doc_admin` to delete others' comments |
 | `Configuration` | `RegisterConfigGeneration`, `ActivateConfigGeneration`, `UpdateDeprecation` | `schema_admin` |
 | `Configuration` | `GetActiveConfigGeneration`, `ListConfigGenerations`, `GetSchema`, `GetDeprecations` | `schema_admin` or `schema_read` |
 
@@ -463,6 +485,34 @@ an ACL change reaches this service within that window. A failed lookup is not
 cached. With `REPOSITORY_ENDPOINT` empty the lookup is replaced by one that
 grants nothing.
 
+The `Comments` RPCs need the `user` scope and then the permission below on
+the document the thread is on:
+
+| RPC | Document permission | Also |
+|---|---|---|
+| `CreateComment` | write | |
+| `UpdateComment` | write | the caller wrote the comment |
+| `DeleteComment` | write | the caller wrote the comment, or holds `doc_admin` |
+| `GetThread`, `ListThreads` | read | |
+| `ResolveThread`, `ReopenThread` | write | |
+| `ListMentions` | none | the caller's own mentions only, as references without payloads |
+| `WaitForComments` | read on every requested document | one refused document fails the call |
+
+`doc_admin` affects nothing else here. A document the repository refuses is
+`permission_denied`, one it does not know is `not_found`, and a failed lookup
+is `internal`. The other error codes:
+
+- `invalid_argument`: a missing or malformed uuid; a payload that fails
+  validation or has an inline id without a matching link; a new thread
+  without `document_uuid`; a `document_uuid` other than an existing thread's;
+  more than 100 documents in a wait; a negative `max_wait_sec` or `size`; a
+  malformed `before`.
+- `not_found`: an unknown thread or comment.
+- `permission_denied`: an edit of another author's comment, or a delete of
+  one without `doc_admin`.
+- `already_exists`: a comment uuid reused with another thread or payload.
+- `failed_precondition`: an edit of a deleted comment.
+
 The two stacks answer the same call differently on the wire, and the
 differences are pinned by the goldens in `testdata/TestDualStackBodies/`:
 
@@ -475,7 +525,7 @@ differences are pinned by the goldens in `testdata/TestDualStackBodies/`:
   `deadline_exceeded` 408 and 504, `failed_precondition` 412 and 400.
 - Deadlines: a Connect client's `Connect-Timeout-Ms` becomes the handler's
   context deadline. The long polls (`PollEventLog`, `PollMessages`,
-  `PollInboxMessages`, `GetActiveConfigGeneration`) answer
+  `PollInboxMessages`, `GetActiveConfigGeneration`, `WaitForComments`) answer
   `deadline_exceeded` when it runs out and `canceled` when the caller goes
   away (`waitEndedError`). Twirp has no timeout header.
 

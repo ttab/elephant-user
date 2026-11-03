@@ -533,6 +533,26 @@ func (s *PGStore) setThreadResolved(
 	return thread, nil
 }
 
+// GetCommentDocument implements [CommentsStore]. It answers the uuid of
+// the document a comment's thread is on, deleted comments included, which
+// is what access to the comment is checked against. An unknown comment is
+// ErrCommentNotFound.
+func (s *PGStore) GetCommentDocument(
+	ctx context.Context, commentUUID uuid.UUID,
+) (uuid.UUID, error) {
+	comment, err := getComment(ctx, s.q, commentUUID)
+	if err != nil {
+		return uuid.Nil, err
+	}
+
+	thread, err := getThread(ctx, s.q, comment.ThreadUUID)
+	if err != nil {
+		return uuid.Nil, err
+	}
+
+	return thread.DocumentUUID, nil
+}
+
 // GetThread implements [CommentsStore]. The thread carries its comments
 // oldest first, deleted ones included without their payload.
 func (s *PGStore) GetThread(
@@ -743,7 +763,7 @@ func mentionedSubjects(payload json.RawMessage) ([]string, error) {
 
 	for _, block := range doc.Content {
 		for _, link := range block.Links {
-			if link.Rel != "mention" || link.URI == "" {
+			if link.Rel != linkRelMention || link.URI == "" {
 				continue
 			}
 

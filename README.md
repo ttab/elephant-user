@@ -5,9 +5,12 @@ written in Go. It stores what belongs to a person rather than to a document:
 **settings documents** (view configurations such as filters and searches,
 validated newsdoc payloads keyed by owner, application, type and key),
 **properties** (flat key-value preferences), **inbox messages** (durable
-newsdoc documents with a read flag) and **system messages** (ephemeral
-notifications such as error toasts). Everything lives in Postgres and is served
-over Twirp and Connect.
+newsdoc documents with a read flag), **system messages** (ephemeral
+notifications such as error toasts) and **comments** (threads of comments on
+repository documents, with access decided by the caller's permissions on the
+document in elephant-repository). Everything lives in Postgres and is served
+over Twirp and Connect as four services: `Settings`, `Messages`, `Comments` and
+`Configuration`.
 
 Two things make it more than a CRUD service. Settings documents can be owned by
 an organisation or a unit as well as a user, so a filter set can be shared
@@ -49,6 +52,9 @@ internal/
   settings.go              settings feature contract: types, events, errors
   settings_service.go      Settings handlers and the SettingsStore interface they consume
   settings_store.go        PGStore: documents, properties, eventlog
+  comments.go              comments feature contract: threads, comments, mentions, events, errors
+  comments_service.go      Comments handlers: document access checks, inline id check, WaitForComments
+  comments_store.go        PGStore: comment threads, comments, mentions
   config_service.go        Configuration handlers
   config.go                config feature contract: types, events, errors
   store.go                 PGStore core: notify channels, subscriber, cleaner
@@ -109,9 +115,11 @@ OIDC_CONFIG=https://<provider>/.well-known/openid-configuration go run ./cmd/use
 `ttrun.env` holds the environment for running against the team's providers
 (`ttrun -- go run ./cmd/user run`). The service starts with no active config
 generation: `GET :1081/health/ready` is green with `schemas` reported as
-failing, and `UpdateDocument`/`PushInboxMessage` fail until a generation is
-registered and activated with a `schema_admin` token — the two seed schemas in
-`internal/se.ecms.user.*.json` are the ones to register. `docs/ops.md`
+failing, and `UpdateDocument`, `PushInboxMessage`, `CreateComment` and
+`UpdateComment` fail until a generation is registered and activated with a
+`schema_admin` token: the three seed schemas in `internal/se.ecms.user.*.json`
+are the ones to register. The `Comments` RPCs also need `REPOSITORY_ENDPOINT`;
+without it every document permission check is refused. `docs/ops.md`
 [Common operations](docs/ops.md#common-operations) has the call.
 
 Tests do not touch the local database: `eltest` starts a Postgres container
@@ -173,7 +181,7 @@ Provided by elephantine's `AuthenticationCLIFlags`.
 
 | Flag | Env | Default | What it does |
 |---|---|---|---|
-| `--repository-endpoint` | `REPOSITORY_ENDPOINT` | | Base URL of elephant-repository, asked over Connect for the caller's permissions on a document with the caller's own token. Empty disables the lookup and every document permission check is refused. |
+| `--repository-endpoint` | `REPOSITORY_ENDPOINT` | | Base URL of elephant-repository, asked over Connect for the caller's permissions on a document with the caller's own token. Empty disables the lookup: every `Comments` RPC that checks a document answers `permission_denied`. |
 
 ### Background work
 

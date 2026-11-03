@@ -207,10 +207,6 @@ func runUser(ctx context.Context, cmd *cli.Command) error {
 		return err
 	}
 
-	// The comments service is the consumer; until it lands the lookup is
-	// built at startup but not handed to any handler.
-	_ = documentPermissions
-
 	store := internal.NewPGStore(logger, dbpool)
 
 	validator, err := internal.NewValidator(ctx, logger, store, metrics)
@@ -252,6 +248,8 @@ func runUser(ctx context.Context, cmd *cli.Command) error {
 	messagesService := internal.NewMessagesService(store, validator)
 	settingsService := internal.NewSettingsService(store, validator)
 	configurationService := internal.NewConfigurationService(logger, store)
+	commentsService := internal.NewCommentsService(
+		store, validator, documentPermissions)
 
 	err = internal.Run(ctx, internal.Parameters{
 		Logger:               logger,
@@ -261,6 +259,7 @@ func runUser(ctx context.Context, cmd *cli.Command) error {
 		MessagesService:      messagesService,
 		SettingsService:      settingsService,
 		ConfigurationService: configurationService,
+		CommentsService:      commentsService,
 		Subscriber:           subscriber,
 		Store:                store,
 		CleanupInterval:      cleanupInterval,
@@ -305,7 +304,8 @@ func newDocumentPermissions(
 }
 
 // schemasReadyCheck reports whether the active config generation has
-// schemas for both settings and messages.
+// schemas for every usage a handler validates against: settings, messages
+// and comments.
 func schemasReadyCheck(ctx context.Context, store *internal.PGStore) error {
 	schemas, err := store.GetActiveSchemas(ctx)
 	if err != nil {
@@ -321,6 +321,7 @@ func schemasReadyCheck(ctx context.Context, store *internal.PGStore) error {
 	for _, usage := range []postgres.SchemaUsage{
 		postgres.SchemaUsageSettings,
 		postgres.SchemaUsageMessages,
+		postgres.SchemaUsageComments,
 	} {
 		if !found[usage] {
 			return fmt.Errorf(

@@ -20,8 +20,8 @@ signal that shows each one. It does not explain how the code is built
 One process with three halves that fail independently:
 
 - **The API** — the Twirp and Connect services for settings documents, key-value properties,
-  system messages, inbox messages and schema configuration, all against
-  Postgres. Stateless; every replica serves everything.
+  system messages, inbox messages, comments on repository documents and schema
+  configuration, all against Postgres. Stateless; every replica serves everything.
 - **The LISTEN connection** — one per replica, on a direct Postgres
   connection, waking long-poll handlers and the schema validator. Without it
   the API keeps working but every long-poll takes its full timeout and a
@@ -63,8 +63,8 @@ does not need to.
 | Postgres, direct connection (`CONN_STRING`) | LISTEN/NOTIFY, and all queries unless a bouncer is configured | startup fails on the initial ping; at runtime every query fails and the `postgres` readiness entry reports it, but the probe stays green (see below) |
 | Postgres via PgBouncer (`BOUNCER_CONN_STRING`, optional) | all queries when configured | same as above for queries; LISTEN is unaffected because it never goes through the bouncer |
 | OIDC provider (`OIDC_CONFIG`) | discovery document and JWKS at startup, key refresh afterwards | startup fails; a running replica keeps validating with cached keys until a key rotates |
-| elephant-repository (`REPOSITORY_ENDPOINT`, optional) | the caller's permissions on a repository document | every document permission check is refused; an unreachable repository fails each check as `internal` and counts `elephant_user_permission_lookups_total{outcome="error"}` |
-| An active config generation | validating `UpdateDocument` and `PushInboxMessage` | those two RPCs fail with an internal error; everything else works; readiness reports `schemas` as failing but stays green |
+| elephant-repository (`REPOSITORY_ENDPOINT`, optional) | the caller's permissions on a document, for every `Comments` RPC but `ListMentions` | unset, those RPCs answer `permission_denied`; unreachable, `internal`, counted in `elephant_user_permission_lookups_total{outcome="error"}` |
+| An active config generation with all three usages | validating `UpdateDocument`, `PushInboxMessage`, `CreateComment`, `UpdateComment` | an RPC whose usage has no active schema fails as `internal`; readiness reports `schemas` failing but stays green |
 
 Truly required to start: Postgres and the OIDC provider. Truly required to
 serve every RPC: an active config generation.
@@ -261,17 +261,18 @@ this service has not taken.
 3. Deploy. The service starts with no active generation; `/health/ready` is
    green with `schemas` reported as failing.
 4. Register and activate the initial generation with a `schema_admin` token:
-   `RegisterConfigGeneration` with the two seed schemas
-   `se.ecms.user.settings@v1.1.0` and `se.ecms.user.messages@v1.0.0` (the
-   versions are in `EmbeddedConfigSchemas`, the specs are the embedded files in
-   `internal/`) and `activate: true`. See
+   `RegisterConfigGeneration` with the three seed schemas
+   `se.ecms.user.settings@v1.1.0`, `se.ecms.user.messages@v1.0.0` and
+   `se.ecms.user.comments@v1.0.0` (the versions are in
+   `EmbeddedConfigSchemas`, the specs are the embedded files in `internal/`)
+   and `activate: true`. See
    [Common operations](#common-operations).
 5. Route traffic.
 
-Out of order: traffic before step 4 means every `UpdateDocument` and
-`PushInboxMessage` fails with an internal error until the generation is
-active. Nothing is lost — the writes are refused, not dropped — but the
-elephant client shows failed saves.
+Out of order: traffic before step 4 means every `UpdateDocument`,
+`PushInboxMessage`, `CreateComment` and `UpdateComment` fails with an internal
+error until the generation is active. Nothing is lost, since the writes are
+refused rather than dropped, but the elephant client shows failed saves.
 
 ## Failure modes
 
@@ -279,13 +280,17 @@ elephant client shows failed saves.
 
 `UpdateDocument` and `PushInboxMessage` return `internal` and the log says
 `no active schema for usage "settings"` (or `"messages"`). No generation is
-active, or the active one lacks a usage.
+active, or the active one lacks a usage. `CreateComment` and `UpdateComment`
+fail the same way with `"comments"`. The `schemas` readiness entry requires
+all three usages, so an environment whose active generation predates the
+comments schema reports it as failing until a generation with
+`se.ecms.user.comments` is activated.
 
 Signal: `health_check_up{name="schemas"} == 0`; `rpc_responses_total{method="UpdateDocument",status="500"}`.
 
 Action: `GetActiveConfigGeneration` to see what is active;
 `ListConfigGenerations` to find the intended one; `ActivateConfigGeneration`
-or register a generation that covers both usages.
+or register a generation that covers every usage.
 
 ### A settings change does not show up in another tab for 30 seconds
 
@@ -468,8 +473,8 @@ Scopes and what they grant:
 
 | Scope | Grants |
 |---|---|
-| `user` | all `Settings` and `Messages` RPCs on the caller's own data; reading shared docs and inbox messages addressed to the caller's org or units; pushing system messages and inbox messages to a user |
-| `doc_admin` | writing settings documents owned by, and pushing inbox messages to, an org or unit the caller belongs to |
+| `user` | all `Settings` and `Messages` RPCs on the caller's own data; reading shared docs and inbox messages addressed to the caller's org or units; pushing system messages and inbox messages to a user; the `Comments` RPCs, with document permission |
+| `doc_admin` | writing settings documents owned by, and pushing inbox messages to, an org or unit the caller belongs to; deleting another author's comment on a document the caller may write |
 | `schema_admin` | registering and activating config generations, toggling deprecations |
 | `schema_read` | reading generations, schemas and deprecations |
 

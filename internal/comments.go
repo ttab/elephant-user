@@ -34,6 +34,13 @@ var ErrNotCommentAuthor = errors.New("not the author of the comment")
 
 // CommentsStore is the storage the Comments handlers need.
 type CommentsStore interface {
+	OnCommentUpdate(
+		ctx context.Context, ch chan CommentEvent,
+		documentUUIDs []uuid.UUID,
+	)
+	GetCommentDocument(
+		ctx context.Context, commentUUID uuid.UUID,
+	) (uuid.UUID, error)
 	CreateComment(
 		ctx context.Context, comment Comment,
 		documentUUID uuid.UUID, kind string,

@@ -390,6 +390,10 @@ type TestElephantUser struct {
 	Messages      user.Messages
 	Settings      user.Settings
 	Configuration user.Configuration
+	Comments      user.Comments
+	// Repository is the stand-in for elephant-repository that answers
+	// the comments service's permission lookups.
+	Repository *repositoryStub
 	// Stack is the protocol stack the clients were built for. Client
 	// and BaseURL are there for tests that need the other stack or a
 	// raw HTTP call.
@@ -455,9 +459,10 @@ type serviceClients struct {
 	Messages      user.Messages
 	Settings      user.Settings
 	Configuration user.Configuration
+	Comments      user.Comments
 }
 
-// newClients builds the three service clients for a stack. Both return the
+// newClients builds the four service clients for a stack. Both return the
 // plain service interfaces, so the tests do not know which one they got.
 func newClients(
 	stack rpcStack, client *http.Client, baseURL string,
@@ -468,6 +473,7 @@ func newClients(
 			Messages:      user.NewMessagesProtobufClient(baseURL, client),
 			Settings:      user.NewSettingsProtobufClient(baseURL, client),
 			Configuration: user.NewConfigurationProtobufClient(baseURL, client),
+			Comments:      user.NewCommentsProtobufClient(baseURL, client),
 		}
 	}
 
@@ -481,6 +487,8 @@ func newClients(
 		Settings: userconnect.NewSettingsServiceClient(
 			client, baseURL, opts...),
 		Configuration: userconnect.NewConfigurationServiceClient(
+			client, baseURL, opts...),
+		Comments: userconnect.NewCommentsServiceClient(
 			client, baseURL, opts...),
 	}
 }
@@ -555,6 +563,16 @@ func startElephantUser(t *testing.T) TestElephantUser {
 	settingsService := internal.NewSettingsService(store, validator)
 	configurationService := internal.NewConfigurationService(logger, store)
 
+	// Permission answers are not cached for longer than a test needs to
+	// change them.
+	repository := newRepositoryStub(t)
+	documentPermissions := internal.NewRepositoryDocumentPermissions(
+		ctx, repository.Client, repository.URL, metrics,
+		internal.WithPermissionsCacheTTL(time.Millisecond))
+
+	commentsService := internal.NewCommentsService(
+		store, validator, documentPermissions)
+
 	err = internal.Run(ctx, internal.Parameters{
 		Logger:               logger,
 		APIServer:            apiServer,
@@ -563,6 +581,7 @@ func startElephantUser(t *testing.T) TestElephantUser {
 		MessagesService:      messagesService,
 		SettingsService:      settingsService,
 		ConfigurationService: configurationService,
+		CommentsService:      commentsService,
 	})
 	test.Mustf(t, err, "run application")
 
@@ -576,6 +595,8 @@ func startElephantUser(t *testing.T) TestElephantUser {
 		Messages:      clients.Messages,
 		Settings:      clients.Settings,
 		Configuration: clients.Configuration,
+		Comments:      clients.Comments,
+		Repository:    repository,
 		Stack:         stack,
 		Client:        client,
 		BaseURL:       baseURL,
