@@ -65,6 +65,27 @@ customer and does not label by org).
   what says its Twirp mount can be retired.
   `code` is where to look for the error breakdown `status` cannot give.
 
+## Repository permissions
+
+Document permission lookups against elephant-repository, made only when
+`REPOSITORY_ENDPOINT` is set.
+
+- `elephant_user_permission_lookups_total{outcome}`: one per lookup.
+  `hit` is an answer served from the 30 s cache, `miss` one the repository
+  gave, `denied` a token the repository refused for lacking a document scope
+  (cached, and answered as nothing granted), `not_found` a document the
+  repository does not know, `error` a lookup that failed and was surfaced as
+  `internal`. A rising `error` rate is the repository unreachable or failing;
+  a rising `denied` rate is callers whose tokens lack `doc_read` or another
+  document scope. The hit ratio says how much the cache is saving the
+  repository.
+- `client_requests_total{client="repository",code,method}`,
+  `client_request_duration_seconds{client="repository"}` and
+  `client_in_flight_requests{client="repository"}`: from elephantine's HTTP
+  client instrumentation, the transport view of the same calls. A slow
+  repository shows here before it shows as `error`, at the 5 s client
+  timeout.
+
 ## Database
 
 From the `pg.PoolStatCollector` that elephantine's `pg.NewPools` registers for

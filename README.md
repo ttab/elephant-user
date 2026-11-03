@@ -54,6 +54,7 @@ internal/
   store.go                 PGStore core: notify channels, subscriber, cleaner
   config_store.go          PGStore: config generations, schemas, deprecations
   validator.go             hot-reloaded per-usage revisor validators
+  permissions.go           document permission lookups against elephant-repository, cached
   metrics.go               every Prometheus collector the service owns
   app.go                   the err-group: API server, subscriber, cleaner
   se.ecms.user.*.json      the seed constraint sets (tests and bootstrapping)
@@ -167,6 +168,12 @@ Provided by elephantine's `AuthenticationCLIFlags`.
 | `--jwt-audience` | `JWT_AUDIENCE` | Required `aud` claim, if the provider sets one. |
 | `--jwt-scope-prefix` | `JWT_SCOPE_PREFIX` | Prefix stripped from scope values before matching `user`, `doc_admin`, `schema_admin`, `schema_read`. |
 | `--client-id`, `--client-secret` | `CLIENT_ID`, `CLIENT_SECRET` | Confidential client credentials for providers that require them to read the discovery document. |
+
+### Repository
+
+| Flag | Env | Default | What it does |
+|---|---|---|---|
+| `--repository-endpoint` | `REPOSITORY_ENDPOINT` | | Base URL of elephant-repository, asked over Connect for the caller's permissions on a document with the caller's own token. Empty disables the lookup and every document permission check is refused. |
 
 ### Background work
 

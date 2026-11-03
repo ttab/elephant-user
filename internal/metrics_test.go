@@ -21,6 +21,7 @@ func TestMetricsLint(t *testing.T) {
 	// Vectors only surface once they have a labelled child.
 	m.Deprecations.WithLabelValues("example").Inc()
 	m.DocsWithDeprecations.WithLabelValues("core/example").Inc()
+	m.PermissionLookups.WithLabelValues(internal.PermissionLookupHit).Inc()
 
 	problems, err := testutil.GatherAndLint(reg)
 	test.Mustf(t, err, "gather and lint metrics")

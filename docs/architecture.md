@@ -397,6 +397,19 @@ group delivery must be read-side (a shared row matched against the reader's
 claims at poll time, as `PollEventLog` does), never push-time fan-out to
 enumerated members.
 
+Access to a repository document is the repository's to decide, not a scope
+here. `internal/permissions.go` asks elephant-repository's
+`Documents.GetPermissions` over Connect, with the caller's bearer token
+forwarded, and maps the answer's `r`, `w` and `m` keys to read, write and meta
+write. The repository refuses a token without one of `doc_read`,
+`doc_read_all`, `doc_write`, `doc_delete` or `doc_admin` before it reads the
+ACL; that refusal comes back as nothing granted, so a handler answers its own
+`permission_denied`. Answers, refusals included, are cached per subject and
+document for 30 s (`DefaultPermissionsCacheTTL`) and not extended by hits, so
+an ACL change reaches this service within that window. A failed lookup is not
+cached. With `REPOSITORY_ENDPOINT` empty the lookup is replaced by one that
+grants nothing.
+
 The two stacks answer the same call differently on the wire, and the
 differences are pinned by the goldens in `testdata/TestDualStackBodies/`:
 

@@ -63,6 +63,7 @@ does not need to.
 | Postgres, direct connection (`CONN_STRING`) | LISTEN/NOTIFY, and all queries unless a bouncer is configured | startup fails on the initial ping; at runtime every query fails and the `postgres` readiness entry reports it, but the probe stays green (see below) |
 | Postgres via PgBouncer (`BOUNCER_CONN_STRING`, optional) | all queries when configured | same as above for queries; LISTEN is unaffected because it never goes through the bouncer |
 | OIDC provider (`OIDC_CONFIG`) | discovery document and JWKS at startup, key refresh afterwards | startup fails; a running replica keeps validating with cached keys until a key rotates |
+| elephant-repository (`REPOSITORY_ENDPOINT`, optional) | the caller's permissions on a repository document | every document permission check is refused; an unreachable repository fails each check as `internal` and counts `elephant_user_permission_lookups_total{outcome="error"}` |
 | An active config generation | validating `UpdateDocument` and `PushInboxMessage` | those two RPCs fail with an internal error; everything else works; readiness reports `schemas` as failing but stays green |
 
 Truly required to start: Postgres and the OIDC provider. Truly required to
@@ -479,9 +480,11 @@ messages record the token's `sub` as `created_by`, so a sender cannot
 impersonate another sender, but any `user` token can push to any recipient.
 
 Outbound: the OIDC discovery document and JWKS at startup and on key
-rotation. Nothing else leaves the process. Secrets are the database
-connection strings and, if a confidential client is configured, the
-OIDC client secret; all arrive as environment variables. The profile port is
+rotation, and, when `REPOSITORY_ENDPOINT` is set, `GetPermissions` calls to
+elephant-repository carrying the caller's own bearer token. The service holds
+no token of its own for the repository. Nothing else leaves the process.
+Secrets are the database connection strings and, if a confidential client is
+configured, the OIDC client secret; all arrive as environment variables. The profile port is
 unauthenticated and internal only.
 
 ## Not in place yet

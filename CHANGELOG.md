@@ -15,6 +15,11 @@ detail. Earlier history is not reconstructed.
 
 Changes:
 
+- New optional `--repository-endpoint` flag (`REPOSITORY_ENDPOINT`), the base
+  URL of elephant-repository, used to look up the caller's permissions on a
+  document with the caller's own token, cached for 30 s. Nothing uses the
+  lookup yet; it is the access check for document comments. Lookups are
+  counted in `elephant_user_permission_lookups_total`.
 - New schema usage `comments` (`SCHEMA_USAGE_COMMENTS`), accepted by
   `RegisterConfigGeneration`, and a new embedded schema
   `se.ecms.user.comments@v1.0.0` declaring the `core/comment` body with

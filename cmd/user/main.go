@@ -105,6 +105,13 @@ removed. Runs on one replica at a time under a job lock.`,
 				Sources: cli.EnvVars("CLEANUP_INTERVAL"),
 				Value:   12 * time.Hour,
 			},
+			&cli.StringFlag{
+				Name:    "repository-endpoint",
+				Sources: cli.EnvVars("REPOSITORY_ENDPOINT"),
+				Usage: `Base URL of elephant-repository, asked for the caller's
+permissions on a document with the caller's own token. Empty disables the
+lookup: every document permission check is then refused.`,
+			},
 		},
 	}
 
@@ -138,6 +145,7 @@ func runUser(ctx context.Context, cmd *cli.Command) error {
 		corsHosts         = cmd.StringSlice("cors-host")
 		cleanupInterval   = cmd.Duration("cleanup-interval")
 		dbMaxConns        = cmd.Int("db-max-conns")
+		repoEndpoint      = cmd.String("repository-endpoint")
 	)
 
 	if cleanupInterval <= 0 {
@@ -193,6 +201,15 @@ func runUser(ctx context.Context, cmd *cli.Command) error {
 	if err != nil {
 		return fmt.Errorf("set up metrics: %w", err)
 	}
+
+	documentPermissions, err := newDocumentPermissions(ctx, repoEndpoint, metrics)
+	if err != nil {
+		return err
+	}
+
+	// The comments service is the consumer; until it lands the lookup is
+	// built at startup but not handed to any handler.
+	_ = documentPermissions
 
 	store := internal.NewPGStore(logger, dbpool)
 
@@ -253,6 +270,38 @@ func runUser(ctx context.Context, cmd *cli.Command) error {
 	}
 
 	return nil
+}
+
+// repositoryClientTimeout bounds a call to the repository, response read
+// included. A permission lookup is a single indexed read on the repository
+// side and sits in front of an interactive request.
+const repositoryClientTimeout = 5 * time.Second
+
+// newDocumentPermissions builds the repository permission lookup, or one
+// that grants nothing when no endpoint is configured.
+func newDocumentPermissions(
+	ctx context.Context, endpoint string, metrics *internal.Metrics,
+) (internal.DocumentPermissions, error) {
+	if endpoint == "" {
+		return internal.NoDocumentPermissions{}, nil
+	}
+
+	instrumentation, err := elephantine.NewHTTPClientInstrumentation(
+		prometheus.DefaultRegisterer)
+	if err != nil {
+		return nil, fmt.Errorf("set up HTTP client metrics: %w", err)
+	}
+
+	client := elephantine.NewHTTPClient(repositoryClientTimeout,
+		elephantine.DialTimeout(elephantine.DialTimeoutInternal))
+
+	err = instrumentation.Client("repository", client)
+	if err != nil {
+		return nil, fmt.Errorf("instrument repository client: %w", err)
+	}
+
+	return internal.NewRepositoryDocumentPermissions(
+		ctx, client, endpoint, metrics), nil
 }
 
 // schemasReadyCheck reports whether the active config generation has
