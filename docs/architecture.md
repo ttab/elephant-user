@@ -32,6 +32,10 @@ main.go
               behind a bouncer (LISTEN + one spare), else the same pool as Main
   auth        = OIDC discovery + JWKS from OIDC_CONFIG
   metrics     = internal.NewMetrics(DefaultRegisterer)
+  permissions = newDocumentPermissions(REPOSITORY_ENDPOINT)
+                  set: Connect client to elephant-repository, 5 s timeout,
+                       instrumented as client "repository", 30 s answer cache
+                  empty: NoDocumentPermissions, which grants nothing
   store       = internal.NewPGStore(pools.Main)   FanOuts for the seven NOTIFY channels
   validator   = internal.NewValidator(store)        loads active schemas, or fails startup
                 └─ go reloadLoop                    NOTIFY-driven, 5 min recheck
@@ -74,6 +78,11 @@ not a crashed process.
 There is no leader election beyond the cleaner's job lock. Every replica
 serves every RPC, LISTENs on its own connection and reloads its own
 validator; replicas scale reads and long-polls linearly.
+
+The permission lookup is the service's only outbound call. It is made inside
+a `Comments` handler, on the request's context, and is not a task in the
+group: an unreachable repository fails those RPCs and nothing else, and no
+readiness entry reports it.
 
 ## Data flow
 
@@ -175,6 +184,13 @@ delivered. Two mechanisms, same principle:
   The push takes the counter first and locks nothing else, so the
   tail-of-transaction rule below does not apply to it; see
   [Inbox messages](#inbox-messages).
+- **Comments have no sequence id.** Threads and comments are keyed by
+  client-made uuids, ordered inside a thread by `(created, uuid)` and listed
+  by `updated`. Timestamps are safe for that because nothing tails comments:
+  `WaitForComments` has no cursor and only names the documents that changed.
+  A comment log, when one is added, takes its ids from a `sequence_counter`
+  row, last in the writing transaction, never from the timestamps; see
+  [ADR-0002](adr/0002-comment-access-follows-the-repository-document.md).
 - **System message ids** are per recipient, from `message_write_lock`: one
   atomic `INSERT ... ON CONFLICT DO UPDATE SET current_message_id = current + 1
   RETURNING`, which creates the row on first use and row-locks it for the
@@ -281,10 +297,12 @@ idempotent; there is no foreign key to the document, which lives in the
 repository, and none to `"user"`, since comments are keyed by the caller's
 subject as the inbox is. There is no sequence id and no log: nothing tails
 comments, display order inside a thread is `(created, uuid)`, and threads
-are listed by `updated`.
+are listed by `updated`. Why access, ids and deletes have this shape is
+[ADR-0002](adr/0002-comment-access-follows-the-repository-document.md).
 
-**The thread row lock is the only lock a comment write takes.**
-`CreateComment` locks the thread with `SELECT ... FOR UPDATE`; when the
+**A comment write locks at most one comment row and then the thread row,
+and nothing after it.** `CreateComment` locks the thread with
+`SELECT ... FOR UPDATE`, the only lock a post takes; when the
 thread does not exist yet it inserts it with `ON CONFLICT DO NOTHING` and
 locks it after, so two clients racing to create one thread both succeed and
 the loser's comment lands in the winner's thread. The comment's `created` is
@@ -336,7 +354,10 @@ documents on the `Comments` FanOut, waits for the first event or
 `max_wait_sec` (default 10, at most 30), and answers with that document and
 any other whose event had already arrived; it does not linger to collect
 more. It has no cursor, so a change between two calls is not reported, and a
-timeout is an empty answer. A comment stream replaces it.
+timeout is an empty answer, so a client lists the threads before its first
+wait. The listener is registered from a goroutine, as `PollEventLog`'s is, so
+a write landing in the first moment of a wait can also be missed. A comment
+log and stream are meant to replace it; neither exists yet.
 
 ### Retention cleaner
 
@@ -385,7 +406,7 @@ to accumulate a streak, and schema changes happen a few times a month.
 
 ## Schemas and config generations
 
-Settings documents and inbox messages are validated against
+Settings documents, inbox messages and comment bodies are validated against
 [revisor](https://github.com/ttab/revisor) constraint sets stored in Postgres
 and managed at runtime through the `Configuration` service. Tables
 (`schema/003_config_generations.sql`):

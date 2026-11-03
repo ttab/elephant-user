@@ -18,7 +18,11 @@ across a desk, and changes to documents and properties are written to an
 eventlog that clients tail with long-polling `PollEventLog` to keep open tabs
 in sync. Validation schemas are not baked in: they live in Postgres as
 **config generations**, are managed through the `Configuration` API, and every
-replica hot-reloads its validators when the active generation changes.
+replica hot-reloads its validators when the active generation changes. And
+access to a comment thread is not decided here at all: the service asks
+elephant-repository what the caller may do with the document the thread is
+on, with the caller's own token, which makes the repository the one service
+it calls out to.
 
 ## Documentation
 
@@ -31,8 +35,8 @@ and run it, and what every configuration flag does. The design lives in
 | [`docs/architecture.md`](docs/architecture.md) | How the service is built: the process model, the write and long-poll paths, id assignment, schemas and config generations, the RPC surface and scopes. Start here to understand the system. |
 | [`docs/ops.md`](docs/ops.md) | The operator's-eye view: dependencies, deployment shape, data flows, the bootstrap order, migrations, and the failure modes with the signal that shows each one. |
 | [`docs/observability.md`](docs/observability.md) | Every metric the service exports and what a change in it means. |
-| [`CONTEXT.md`](CONTEXT.md) | What the words mean: owner, recipient, reader, broadcast, read state, and where a term narrows the platform's. |
-| [`docs/adr/`](docs/adr/0001-inbox-shared-row-with-per-reader-state.md) | Why a decision went the way it did, and what must not be reintroduced. |
+| [`CONTEXT.md`](CONTEXT.md) | What the words mean: owner, recipient, reader, broadcast, read state, thread, document permission, and where a term narrows the platform's. |
+| [`docs/adr/`](docs/adr/0001-inbox-shared-row-with-per-reader-state.md) | Why a decision went the way it did, and what must not be reintroduced: the shared-row inbox (0001), comment access following the repository document ([0002](docs/adr/0002-comment-access-follows-the-repository-document.md)). |
 | [`CHANGELOG.md`](CHANGELOG.md) | What each release changed for a consumer, with the deploy procedure where one is needed. |
 
 The documents link to each other by heading, and a renamed heading otherwise
@@ -100,7 +104,9 @@ arrives.
 
 ## Running a local dev instance
 
-The service needs Postgres and an OIDC provider whose tokens it can validate.
+The service needs Postgres and an OIDC provider whose tokens it can validate,
+and, for the `Comments` RPCs only, an elephant-repository to ask for document
+permissions.
 
 ```sh
 # Once: database and schema.
@@ -181,7 +187,7 @@ Provided by elephantine's `AuthenticationCLIFlags`.
 
 | Flag | Env | Default | What it does |
 |---|---|---|---|
-| `--repository-endpoint` | `REPOSITORY_ENDPOINT` | | Base URL of elephant-repository, asked over Connect for the caller's permissions on a document with the caller's own token. Empty disables the lookup: every `Comments` RPC that checks a document answers `permission_denied`. |
+| `--repository-endpoint` | `REPOSITORY_ENDPOINT` | | Base URL of elephant-repository, asked over Connect for the caller's permissions on a document with the caller's own token; 5 s timeout, answers cached 30 s. Empty: every `Comments` RPC but `ListMentions` answers `permission_denied`. |
 
 ### Background work
 
@@ -197,7 +203,13 @@ the `/twirp/` mount, waits for the next major release and for
 `rpc_protocol_responses_total{protocol="twirp"}` to reach zero.
 
 **Notifications over a websocket.** The long-poll transports (`PollMessages`,
-`PollInboxMessages`, `PollEventLog`) are meant to be replaced by a websocket
-subscription API with an ingest endpoint for producers such as elephant-wires.
-The routing model is not decided; the `Messages` RPC shapes are frozen until
-that exists.
+`PollInboxMessages`, `PollEventLog`, `WaitForComments`) are meant to be
+replaced by a websocket subscription API with an ingest endpoint for producers
+such as elephant-wires. The routing model is not decided; the `Messages` RPC
+shapes are frozen until that exists.
+
+**A comment log.** Comments have no commit-ordered id and no change log, so
+`WaitForComments` can only say which documents changed, and a change between
+two waits is missed; clients list the threads before the first wait. The
+`comment_update` notification already carries the record a log row would
+hold. Mentions are stored but not delivered to the mentioned subject.

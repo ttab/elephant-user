@@ -41,7 +41,7 @@ and the replica is validating against the previous one.
 ## RPC
 
 From elephantine; identical labels on every service in the fleet. `service`
-is the short name (`Settings`, `Messages`, `Configuration`), `method` the RPC,
+is the short name (`Settings`, `Messages`, `Comments`, `Configuration`), `method` the RPC,
 `customer` the empty string (this service runs in an isolated environment per
 customer and does not label by org).
 
@@ -54,10 +54,13 @@ customer and does not label by org).
   Long-polls answer `200` on timeout as well as on data, so their volume is
   driven by client count, not by writes.
 - `rpc_duration_seconds{service,method,customer}` — histogram. `PollEventLog`,
-  `PollMessages`, `PollInboxMessages` and `GetActiveConfigGeneration` are
-  long-polls and legitimately sit at their timeouts (30 s and 10 s); read
-  their p50 as "how often something happened", not as latency. Every other
-  method should be milliseconds.
+  `PollMessages`, `PollInboxMessages`, `GetActiveConfigGeneration` and
+  `WaitForComments` are long-polls and legitimately sit at their timeouts
+  (30 s; 10 s for `GetActiveConfigGeneration`; the client's `max_wait_sec`,
+  10 s by default and at most 30 s, for `WaitForComments`); read their p50 as
+  "how often something happened", not as latency. Every other method should
+  be milliseconds, except that a comments RPC that misses the permission cache
+  also waits for the repository.
 - `rpc_protocol_responses_total{service,method,protocol,code,client_id}` —
   the same responses broken down by RPC code and by the calling application
   (the token's client id, empty for anonymous or refused calls). `protocol`
@@ -85,6 +88,10 @@ Document permission lookups against elephant-repository, made only when
   client instrumentation, the transport view of the same calls. A slow
   repository shows here before it shows as `error`, at the 5 s client
   timeout.
+- `dns_duration_seconds{event}` and `tls_duration_seconds{event}`: registered
+  by the same instrumentation, without a client label. The repository client
+  is the only instrumented client, so they are its connection setup; a TLS
+  series exists only for an `https` endpoint.
 
 ## Database
 
@@ -143,8 +150,10 @@ two pool sizes when the split is active. `pgxpool_max_conns` is the configured s
   turn the probe red, so a replica is only pulled from the load balancer when
   the process itself is gone. `name="postgres"` at 0 means the query pool
   cannot reach the database or is starved; `name="schemas"` at 0 means the
-  active generation lacks a `settings` or `messages` schema and every
-  validated write is failing. Alert on both.
+  active generation lacks a `settings`, `messages` or `comments` schema and
+  the validated writes of that usage are failing. Alert on both. There is no
+  entry for the repository; `elephant_user_permission_lookups_total` is its
+  signal.
 
 ## State gauges
 
