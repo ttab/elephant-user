@@ -101,6 +101,7 @@ type SchemaUsage string
 const (
 	SchemaUsageSettings SchemaUsage = "settings"
 	SchemaUsageMessages SchemaUsage = "messages"
+	SchemaUsageComments SchemaUsage = "comments"
 )
 
 func (e *SchemaUsage) Scan(src interface{}) error {
@@ -179,6 +180,30 @@ func (ns NullUserKind) Value() (driver.Value, error) {
 		return nil, nil
 	}
 	return string(ns.UserKind), nil
+}
+
+type Comment struct {
+	UUID       uuid.UUID
+	ThreadUuid uuid.UUID
+	Author     string
+	AuthorName string
+	Created    pgtype.Timestamptz
+	Updated    pgtype.Timestamptz
+	Deleted    pgtype.Timestamptz
+	DeletedBy  pgtype.Text
+	Mentioned  []string
+	Payload    []byte
+}
+
+type CommentThread struct {
+	UUID         uuid.UUID
+	DocumentUuid uuid.UUID
+	Kind         string
+	Created      pgtype.Timestamptz
+	CreatedBy    string
+	Updated      pgtype.Timestamptz
+	Resolved     pgtype.Timestamptz
+	ResolvedBy   pgtype.Text
 }
 
 type ConfigGeneration struct {

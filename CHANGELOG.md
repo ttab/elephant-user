@@ -4,6 +4,26 @@ All notable changes to elephant-user from v1.0.0 onwards are documented here.
 Entries are derived from the release tags; the linked pull requests hold the
 detail. Earlier history is not reconstructed.
 
+## [v1.9.0] - Unreleased
+
+**Migrations:**
+
+- `schema/006_comments.sql` creates the `comment_thread` and `comment` tables
+  and adds `comments` to the `schema_usage` enum. Run it before the deploy; no
+  service window, since no existing row is touched. A rollback drops the
+  tables but cannot remove the enum value.
+
+Changes:
+
+- New schema usage `comments` (`SCHEMA_USAGE_COMMENTS`), accepted by
+  `RegisterConfigGeneration`, and a new embedded schema
+  `se.ecms.user.comments@v1.0.0` declaring the `core/comment` body with
+  mention and see-also links. It is register-ready but nothing validates
+  against it yet; see "Register and activate the seed schemas" in
+  `docs/ops.md`.
+- Dependency upgrades: elephant-api to the pre-release carrying
+  `SCHEMA_USAGE_COMMENTS`.
+
 ## [v1.8.0] - 2026-10-14
 
 **Behaviour change (settings schema):** the embedded settings schema is now

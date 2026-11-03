@@ -117,6 +117,11 @@ func TestConfiguration(t *testing.T) {
 					Usage:   user.SchemaUsage_SCHEMA_USAGE_MESSAGES,
 				},
 				{
+					Name:    "se.ecms.user.comments",
+					Version: "v1.0.0",
+					Usage:   user.SchemaUsage_SCHEMA_USAGE_COMMENTS,
+				},
+				{
 					Name:    "test-settings-extra",
 					Version: "v1.0.0",
 					Spec:    extraSettingsSpec,
@@ -327,6 +332,18 @@ func TestConfiguration(t *testing.T) {
 			schemaRes.Version, schemaRes.Usage)
 	}
 
+	commentsSchema, err := eu.Configuration.GetSchema(readCtx,
+		&user.GetSchemaRequest{
+			Name: "se.ecms.user.comments",
+		})
+	test.Mustf(t, err, "get active comments schema")
+
+	if commentsSchema.Version != "v1.0.0" ||
+		commentsSchema.Usage != user.SchemaUsage_SCHEMA_USAGE_COMMENTS {
+		t.Fatalf("unexpected version %q or usage %q for comments schema",
+			commentsSchema.Version, commentsSchema.Usage)
+	}
+
 	_, err = eu.Configuration.GetSchema(readCtx,
 		&user.GetSchemaRequest{
 			Name: "no-such-schema",
@@ -370,6 +387,11 @@ func TestConfiguration(t *testing.T) {
 					Name:    "se.ecms.user.messages",
 					Version: "v1.0.0",
 					Usage:   user.SchemaUsage_SCHEMA_USAGE_MESSAGES,
+				},
+				{
+					Name:    "se.ecms.user.comments",
+					Version: "v1.0.0",
+					Usage:   user.SchemaUsage_SCHEMA_USAGE_COMMENTS,
 				},
 				{
 					Name:    "test-settings-deprecated",

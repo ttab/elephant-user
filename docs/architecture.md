@@ -324,10 +324,13 @@ and managed at runtime through the `Configuration` service. Tables
 | `config_generation_schema` | which `(name, version)` each generation includes, one version per name |
 | `deprecation` | `label → enforced` |
 
-Each schema declares a **usage**, `settings` or `messages`, and the validator
-builds one `revisor.Validator` per usage from the active generation. A
-settings type therefore cannot validate as an inbox message or vice versa;
-before v1.3.0 one shared validator accepted either.
+Each schema declares a **usage**, `settings`, `messages` or `comments`, and
+the validator builds one `revisor.Validator` per usage from the active
+generation. A settings type therefore cannot validate as an inbox message or
+vice versa; before v1.3.0 one shared validator accepted either. The
+`comments` usage holds `se.ecms.user.comments`, the body of a comment
+(`core/comment`); its html policies are its own, since a policy is only
+visible to the validator of the usage that declares it.
 
 `RegisterConfigGeneration` (scope `schema_admin`) validates every spec,
 dry-runs building a validator per usage so a generation that cannot be built

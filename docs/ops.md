@@ -240,6 +240,12 @@ those rows. Run the migration before the deploy; no service window is
 needed because no caller is affected, but old code cannot write the new
 table, so do not deploy first. Rollback recreates the old table, empty.
 
+`schema/006_comments.sql` (v1.9.0) adds the `comment_thread` and `comment`
+tables and the `comments` value of `schema_usage`. It touches no existing
+row: run it before the deploy, no service window. Postgres cannot drop an enum
+value, so a rollback drops the two tables and leaves `comments` in the type;
+the migration adds it with `IF NOT EXISTS` and can run again on top of it.
+
 The `job_lock` table is elephantine's; `schema/vendor.json` declares that and
 `001_messages.sql` asserts it created the table by hand
 (`-- covers:`). `go test ./schema/` fails when elephantine ships a migration
@@ -406,9 +412,9 @@ overwrote the first; the eventlog shows both versions. Known limitation; an
 ## Common operations
 
 **Register and activate the seed schemas.** Needs a token with `schema_admin`.
-The request is a `RegisterConfigGenerationRequest` with the two embedded
-constraint sets as `spec` strings, `usage` set to `SCHEMA_USAGE_SETTINGS` and
-`SCHEMA_USAGE_MESSAGES`, and `activate: true`:
+The request is a `RegisterConfigGenerationRequest` with the three embedded
+constraint sets as `spec` strings, `usage` set to `SCHEMA_USAGE_SETTINGS`,
+`SCHEMA_USAGE_MESSAGES` and `SCHEMA_USAGE_COMMENTS`, and `activate: true`:
 
 ```sh
 curl -sS -X POST "$USER_API/twirp/elephant.user.Configuration/RegisterConfigGeneration" \
