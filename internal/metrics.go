@@ -11,6 +11,21 @@ import (
 const (
 	LabelDeprecation = "label"
 	LabelDocType     = "doc_type"
+	LabelOutcome     = "outcome"
+)
+
+// Outcomes of a document permission lookup.
+const (
+	// PermissionLookupHit is an answer served from the cache.
+	PermissionLookupHit = "hit"
+	// PermissionLookupMiss is an answer the repository gave.
+	PermissionLookupMiss = "miss"
+	// PermissionLookupDenied is a token the repository refused outright.
+	PermissionLookupDenied = "denied"
+	// PermissionLookupNotFound is a document the repository does not know.
+	PermissionLookupNotFound = "not_found"
+	// PermissionLookupError is a lookup that failed.
+	PermissionLookupError = "error"
 )
 
 // Metrics holds every Prometheus collector the service owns. It is
@@ -23,6 +38,9 @@ type Metrics struct {
 	// DocsWithDeprecations counts validated documents that used at least
 	// one deprecated construct, by document type.
 	DocsWithDeprecations *prometheus.CounterVec
+	// PermissionLookups counts document permission lookups against the
+	// repository by outcome.
+	PermissionLookups *prometheus.CounterVec
 }
 
 // NewMetrics registers the service metrics with reg and fails if any
@@ -47,6 +65,14 @@ func NewMetrics(reg prometheus.Registerer) (*Metrics, error) {
 		Help: "Validated documents that used at least one deprecated " +
 			"construct, by document type.",
 	}, []string{LabelDocType})
+
+	h.CounterVec(&m.PermissionLookups, prometheus.CounterOpts{
+		Name: "elephant_user_permission_lookups_total",
+		Help: "Document permission lookups by outcome: hit from the cache, " +
+			"miss answered by the repository, denied for a token the " +
+			"repository refused, not_found, or error. A rising error " +
+			"rate means document access checks are failing.",
+	}, []string{LabelOutcome})
 
 	err := h.Err()
 	if err != nil {

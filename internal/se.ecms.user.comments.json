@@ -1,0 +1,92 @@
+{
+  "version": 1,
+  "name": "se.ecms.user.comments",
+  "documents": [
+    {
+      "name": "Comment",
+      "description": "The body of a comment in a thread on a document.",
+      "declares": "core/comment",
+      "attributes": {
+        "title": {
+          "optional": true,
+          "allowEmpty": true
+        }
+      },
+      "content": [
+        {
+          "description": "Text block",
+          "declares": {
+            "type": "core/text"
+          },
+          "data": {
+            "text": {
+              "allowEmpty": true,
+              "format": "html",
+              "htmlPolicy": "comment"
+            }
+          },
+          "links": [
+            {
+              "description": "A mention of a subject, bound by id to a <mention> element in the text",
+              "declares": {
+                "rel": "mention"
+              },
+              "attributes": {
+                "id": {},
+                "type": {},
+                "uri": {
+                  "glob": [
+                    "core://user/**",
+                    "core://application/**",
+                    "keycloak://user/**"
+                  ]
+                }
+              }
+            },
+            {
+              "description": "A reference to a document, or to a thread or comment on it, bound by id to an <a> element in the text",
+              "declares": {
+                "rel": "see-also"
+              },
+              "attributes": {
+                "id": {},
+                "type": {},
+                "uuid": {}
+              },
+              "data": {
+                "thread": {"optional": true},
+                "comment": {"optional": true}
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "htmlPolicies": [
+    {
+      "name": "default",
+      "elements": {
+        "strong": {},
+        "em": {}
+      }
+    },
+    {
+      "name": "comment",
+      "uses": "default",
+      "elements": {
+        "mention": {
+          "attributes": {
+            "id": {}
+          }
+        },
+        "a": {
+          "attributes": {
+            "id": {},
+            "href": {"optional": true}
+          }
+        }
+      }
+    }
+  ]
+}

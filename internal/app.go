@@ -21,6 +21,7 @@ type Parameters struct {
 	MessagesService      *MessagesService
 	SettingsService      *SettingsService
 	ConfigurationService *ConfigurationService
+	CommentsService      *CommentsService
 
 	// Subscriber is the pg LISTEN subscriber to run alongside the
 	// server. Optional; tests run their own.
@@ -63,10 +64,12 @@ func Run(ctx context.Context, p Parameters) error {
 	settingsServer := user.NewSettingsServer(p.SettingsService, opts.ServerOptions())
 	configurationServer := user.NewConfigurationServer(
 		p.ConfigurationService, opts.ServerOptions())
+	commentsServer := user.NewCommentsServer(p.CommentsService, opts.ServerOptions())
 
 	p.APIServer.RegisterAPI(messagesServer, opts)
 	p.APIServer.RegisterAPI(settingsServer, opts)
 	p.APIServer.RegisterAPI(configurationServer, opts)
+	p.APIServer.RegisterAPI(commentsServer, opts)
 
 	// The same services on the Connect paths (/elephant.user.<Service>/).
 	handlerOpts := opts.HandlerOptions()
@@ -77,10 +80,13 @@ func Run(ctx context.Context, p Parameters) error {
 		p.SettingsService, handlerOpts...)
 	configurationPath, configurationHandler := userconnect.NewConfigurationServiceHandler(
 		p.ConfigurationService, handlerOpts...)
+	commentsPath, commentsHandler := userconnect.NewCommentsServiceHandler(
+		p.CommentsService, handlerOpts...)
 
 	p.APIServer.RegisterConnect(messagesPath, messagesHandler, opts)
 	p.APIServer.RegisterConnect(settingsPath, settingsHandler, opts)
 	p.APIServer.RegisterConnect(configurationPath, configurationHandler, opts)
+	p.APIServer.RegisterConnect(commentsPath, commentsHandler, opts)
 
 	grp := elephantine.NewErrGroup(ctx, p.Logger,
 		elephantine.WithErrGroupMetricsRegisterer(p.Registerer))

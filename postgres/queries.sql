@@ -327,3 +327,117 @@ FROM config_generation_schema AS cgs
            ON ds.name = cgs.name AND ds.version = cgs.version
 WHERE cgs.generation_id = @generation_id
 ORDER BY cgs.ordinal;
+
+-- name: InsertCommentThread :execrows
+INSERT INTO comment_thread (
+      uuid, document_uuid, kind, created, created_by, updated
+) VALUES (
+      @uuid, @document_uuid, @kind, @created, @created_by, @created
+)
+ON CONFLICT (uuid) DO NOTHING;
+
+-- name: GetCommentThread :one
+SELECT t.uuid, t.document_uuid, t.kind, t.created, t.created_by, t.updated,
+       t.resolved, t.resolved_by,
+       (SELECT COUNT(*) FROM comment AS c
+        WHERE c.thread_uuid = t.uuid AND c.deleted IS NULL)::bigint AS live_comments
+FROM comment_thread AS t
+WHERE t.uuid = @uuid;
+
+-- name: GetCommentThreadForUpdate :one
+SELECT uuid, document_uuid, kind, created, created_by, updated,
+       resolved, resolved_by
+FROM comment_thread
+WHERE uuid = @uuid
+FOR UPDATE;
+
+-- name: ListCommentThreads :many
+SELECT t.uuid, t.document_uuid, t.kind, t.created, t.created_by, t.updated,
+       t.resolved, t.resolved_by,
+       (SELECT COUNT(*) FROM comment AS c
+        WHERE c.thread_uuid = t.uuid AND c.deleted IS NULL)::bigint AS live_comments
+FROM comment_thread AS t
+WHERE t.document_uuid = @document_uuid
+      AND (@include_resolved::bool OR t.resolved IS NULL)
+ORDER BY t.updated DESC, t.uuid DESC;
+
+-- name: TouchCommentThread :exec
+UPDATE comment_thread
+SET updated = @updated
+WHERE uuid = @uuid;
+
+-- name: ResolveCommentThread :exec
+UPDATE comment_thread
+SET resolved = @resolved,
+    resolved_by = @resolved_by,
+    updated = @resolved
+WHERE uuid = @uuid;
+
+-- name: ReopenCommentThread :exec
+UPDATE comment_thread
+SET resolved = NULL,
+    resolved_by = NULL,
+    updated = @updated
+WHERE uuid = @uuid;
+
+-- name: InsertComment :execrows
+INSERT INTO comment (
+      uuid, thread_uuid, author, author_name, created, updated,
+      mentioned, payload
+) VALUES (
+      @uuid, @thread_uuid, @author, @author_name, @created, @created,
+      @mentioned, @payload
+)
+ON CONFLICT (uuid) DO NOTHING;
+
+-- name: GetComment :one
+SELECT uuid, thread_uuid, author, author_name, created, updated,
+       deleted, deleted_by, mentioned, payload
+FROM comment
+WHERE uuid = @uuid;
+
+-- name: GetCommentForUpdate :one
+SELECT uuid, thread_uuid, author, author_name, created, updated,
+       deleted, deleted_by, mentioned, payload
+FROM comment
+WHERE uuid = @uuid
+FOR UPDATE;
+
+-- name: ListComments :many
+SELECT uuid, thread_uuid, author, author_name, created, updated,
+       deleted, deleted_by, mentioned, payload
+FROM comment
+WHERE thread_uuid = @thread_uuid
+ORDER BY created ASC, uuid ASC;
+
+-- name: ListCommentsByThreads :many
+SELECT uuid, thread_uuid, author, author_name, created, updated,
+       deleted, deleted_by, mentioned, payload
+FROM comment
+WHERE thread_uuid = ANY(@thread_uuids::uuid[])
+ORDER BY thread_uuid, created ASC, uuid ASC;
+
+-- name: UpdateComment :exec
+UPDATE comment
+SET payload = @payload,
+    mentioned = @mentioned,
+    updated = @updated
+WHERE uuid = @uuid;
+
+-- name: DeleteComment :exec
+UPDATE comment
+SET deleted = @deleted,
+    deleted_by = @deleted_by
+WHERE uuid = @uuid;
+
+-- name: ListMentions :many
+SELECT c.uuid, c.thread_uuid, t.document_uuid, c.author, c.author_name,
+       c.created
+FROM comment AS c
+     INNER JOIN comment_thread AS t ON t.uuid = c.thread_uuid
+WHERE c.mentioned @> ARRAY[@subject::text]
+      AND c.deleted IS NULL
+      AND (sqlc.narg('before')::timestamptz IS NULL
+           OR c.created < sqlc.narg('before')::timestamptz)
+ORDER BY c.created DESC, c.uuid DESC
+LIMIT sqlc.arg('limit')::bigint;

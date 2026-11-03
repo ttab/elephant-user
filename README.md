@@ -5,9 +5,12 @@ written in Go. It stores what belongs to a person rather than to a document:
 **settings documents** (view configurations such as filters and searches,
 validated newsdoc payloads keyed by owner, application, type and key),
 **properties** (flat key-value preferences), **inbox messages** (durable
-newsdoc documents with a read flag) and **system messages** (ephemeral
-notifications such as error toasts). Everything lives in Postgres and is served
-over Twirp and Connect.
+newsdoc documents with a read flag), **system messages** (ephemeral
+notifications such as error toasts) and **comments** (threads of comments on
+repository documents, with access decided by the caller's permissions on the
+document in elephant-repository). Everything lives in Postgres and is served
+over Twirp and Connect as four services: `Settings`, `Messages`, `Comments` and
+`Configuration`.
 
 Two things make it more than a CRUD service. Settings documents can be owned by
 an organisation or a unit as well as a user, so a filter set can be shared
@@ -15,7 +18,11 @@ across a desk, and changes to documents and properties are written to an
 eventlog that clients tail with long-polling `PollEventLog` to keep open tabs
 in sync. Validation schemas are not baked in: they live in Postgres as
 **config generations**, are managed through the `Configuration` API, and every
-replica hot-reloads its validators when the active generation changes.
+replica hot-reloads its validators when the active generation changes. And
+access to a comment thread is not decided here at all: the service asks
+elephant-repository what the caller may do with the document the thread is
+on, with the caller's own token, which makes the repository the one service
+it calls out to.
 
 ## Documentation
 
@@ -28,8 +35,8 @@ and run it, and what every configuration flag does. The design lives in
 | [`docs/architecture.md`](docs/architecture.md) | How the service is built: the process model, the write and long-poll paths, id assignment, schemas and config generations, the RPC surface and scopes. Start here to understand the system. |
 | [`docs/ops.md`](docs/ops.md) | The operator's-eye view: dependencies, deployment shape, data flows, the bootstrap order, migrations, and the failure modes with the signal that shows each one. |
 | [`docs/observability.md`](docs/observability.md) | Every metric the service exports and what a change in it means. |
-| [`CONTEXT.md`](CONTEXT.md) | What the words mean: owner, recipient, reader, broadcast, read state, and where a term narrows the platform's. |
-| [`docs/adr/`](docs/adr/0001-inbox-shared-row-with-per-reader-state.md) | Why a decision went the way it did, and what must not be reintroduced. |
+| [`CONTEXT.md`](CONTEXT.md) | What the words mean: owner, recipient, reader, broadcast, read state, thread, document permission, and where a term narrows the platform's. |
+| [`docs/adr/`](docs/adr/0001-inbox-shared-row-with-per-reader-state.md) | Why a decision went the way it did, and what must not be reintroduced: the shared-row inbox (0001), comment access following the repository document ([0002](docs/adr/0002-comment-access-follows-the-repository-document.md)). |
 | [`CHANGELOG.md`](CHANGELOG.md) | What each release changed for a consumer, with the deploy procedure where one is needed. |
 
 The documents link to each other by heading, and a renamed heading otherwise
@@ -49,11 +56,15 @@ internal/
   settings.go              settings feature contract: types, events, errors
   settings_service.go      Settings handlers and the SettingsStore interface they consume
   settings_store.go        PGStore: documents, properties, eventlog
+  comments.go              comments feature contract: threads, comments, mentions, events, errors
+  comments_service.go      Comments handlers: document access checks, inline id check, WaitForComments
+  comments_store.go        PGStore: comment threads, comments, mentions
   config_service.go        Configuration handlers
   config.go                config feature contract: types, events, errors
   store.go                 PGStore core: notify channels, subscriber, cleaner
   config_store.go          PGStore: config generations, schemas, deprecations
   validator.go             hot-reloaded per-usage revisor validators
+  permissions.go           document permission lookups against elephant-repository, cached
   metrics.go               every Prometheus collector the service owns
   app.go                   the err-group: API server, subscriber, cleaner
   se.ecms.user.*.json      the seed constraint sets (tests and bootstrapping)
@@ -93,7 +104,9 @@ arrives.
 
 ## Running a local dev instance
 
-The service needs Postgres and an OIDC provider whose tokens it can validate.
+The service needs Postgres and an OIDC provider whose tokens it can validate,
+and, for the `Comments` RPCs only, an elephant-repository to ask for document
+permissions.
 
 ```sh
 # Once: database and schema.
@@ -108,9 +121,11 @@ OIDC_CONFIG=https://<provider>/.well-known/openid-configuration go run ./cmd/use
 `ttrun.env` holds the environment for running against the team's providers
 (`ttrun -- go run ./cmd/user run`). The service starts with no active config
 generation: `GET :1081/health/ready` is green with `schemas` reported as
-failing, and `UpdateDocument`/`PushInboxMessage` fail until a generation is
-registered and activated with a `schema_admin` token — the two seed schemas in
-`internal/se.ecms.user.*.json` are the ones to register. `docs/ops.md`
+failing, and `UpdateDocument`, `PushInboxMessage`, `CreateComment` and
+`UpdateComment` fail until a generation is registered and activated with a
+`schema_admin` token: the three seed schemas in `internal/se.ecms.user.*.json`
+are the ones to register. The `Comments` RPCs also need `REPOSITORY_ENDPOINT`;
+without it every document permission check is refused. `docs/ops.md`
 [Common operations](docs/ops.md#common-operations) has the call.
 
 Tests do not touch the local database: `eltest` starts a Postgres container
@@ -168,6 +183,12 @@ Provided by elephantine's `AuthenticationCLIFlags`.
 | `--jwt-scope-prefix` | `JWT_SCOPE_PREFIX` | Prefix stripped from scope values before matching `user`, `doc_admin`, `schema_admin`, `schema_read`. |
 | `--client-id`, `--client-secret` | `CLIENT_ID`, `CLIENT_SECRET` | Confidential client credentials for providers that require them to read the discovery document. |
 
+### Repository
+
+| Flag | Env | Default | What it does |
+|---|---|---|---|
+| `--repository-endpoint` | `REPOSITORY_ENDPOINT` | | Base URL of elephant-repository, asked over Connect for the caller's permissions on a document with the caller's own token; 5 s timeout, answers cached 30 s. Empty: every `Comments` RPC but `ListMentions` answers `permission_denied`. |
+
 ### Background work
 
 | Flag | Env | Default | What it does |
@@ -182,7 +203,13 @@ the `/twirp/` mount, waits for the next major release and for
 `rpc_protocol_responses_total{protocol="twirp"}` to reach zero.
 
 **Notifications over a websocket.** The long-poll transports (`PollMessages`,
-`PollInboxMessages`, `PollEventLog`) are meant to be replaced by a websocket
-subscription API with an ingest endpoint for producers such as elephant-wires.
-The routing model is not decided; the `Messages` RPC shapes are frozen until
-that exists.
+`PollInboxMessages`, `PollEventLog`, `WaitForComments`) are meant to be
+replaced by a websocket subscription API with an ingest endpoint for producers
+such as elephant-wires. The routing model is not decided; the `Messages` RPC
+shapes are frozen until that exists.
+
+**A comment log.** Comments have no commit-ordered id and no change log, so
+`WaitForComments` can only say which documents changed, and a change between
+two waits is missed; clients list the threads before the first wait. The
+`comment_update` notification already carries the record a log row would
+hold. Mentions are stored but not delivered to the mentioned subject.

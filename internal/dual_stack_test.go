@@ -25,6 +25,7 @@ const (
 	settingsPath  = "/elephant.user.Settings/"
 	messagesPath  = "/elephant.user.Messages/"
 	configPath    = "/elephant.user.Configuration/"
+	commentsPath  = "/elephant.user.Comments/"
 	jsonMediaType = "application/json"
 )
 
@@ -205,6 +206,69 @@ func TestDualStackBodies(t *testing.T) {
 
 	test.AgainstGolden(t, regenerate, connectExists,
 		filepath.Join(dataDir, "already-exists-connect.json"))
+
+	// A comment answers with the comment and its thread; the second call
+	// is an idempotent repeat of the first and gets the same answer. The
+	// thread read carries the comments.
+	commentBody := `{"uuid":"c0000000-0000-4000-8000-000000000001",` +
+		`"thread_uuid":"b0000000-0000-4000-8000-000000000001",` +
+		`"document_uuid":"a0000000-0000-4000-8000-000000000001",` +
+		`"kind":"factcheck","payload":{"uuid":` +
+		`"6f1d1d8e-2b1a-4c55-9d7e-3a2f4b5c6d7e","type":"core/comment",` +
+		`"content":[{"type":"core/text","data":{"text":` +
+		`"Ask <mention id=\"m1\">Anna</mention>."},"links":[{"id":"m1",` +
+		`"rel":"mention","type":"tt/keycloak","uri":"core://user/anna"}]}]}}`
+	threadBody := `{"uuid":"b0000000-0000-4000-8000-000000000001"}`
+
+	scrubTimes := func(v any) {
+		obj, ok := v.(map[string]any)
+		if !ok {
+			return
+		}
+
+		delete(obj, "created")
+		delete(obj, "updated")
+
+		comments, _ := obj["comments"].([]any)
+		for _, c := range comments {
+			cm, ok := c.(map[string]any)
+			if ok {
+				delete(cm, "created")
+				delete(cm, "updated")
+			}
+		}
+	}
+
+	scrubComment := func(res rpcResponse) rpcResponse {
+		scrubTimes(res.Body["comment"])
+		scrubTimes(res.Body["thread"])
+
+		return res
+	}
+
+	twirpComment := scrubComment(eu.postJSON(t, token,
+		twirpPrefix+commentsPath+"CreateComment", commentBody, nil))
+
+	test.AgainstGolden(t, regenerate, twirpComment,
+		filepath.Join(dataDir, "create-comment-twirp.json"))
+
+	connectComment := scrubComment(eu.postJSON(t, token,
+		commentsPath+"CreateComment", commentBody, nil))
+
+	test.AgainstGolden(t, regenerate, connectComment,
+		filepath.Join(dataDir, "create-comment-connect.json"))
+
+	twirpThread := scrubComment(eu.postJSON(t, token,
+		twirpPrefix+commentsPath+"GetThread", threadBody, nil))
+
+	test.AgainstGolden(t, regenerate, twirpThread,
+		filepath.Join(dataDir, "get-thread-twirp.json"))
+
+	connectThread := scrubComment(eu.postJSON(t, token,
+		commentsPath+"GetThread", threadBody, nil))
+
+	test.AgainstGolden(t, regenerate, connectThread,
+		filepath.Join(dataDir, "get-thread-connect.json"))
 }
 
 // TestDualStackErrorParity runs the error paths over both stacks against
@@ -376,6 +440,70 @@ func TestDualStackErrorParity(t *testing.T) {
 
 		test.Equalf(t, "schemas.1.spec", rpc.Meta(connectErr)["argument"],
 			"name the schema entry that lacks a spec")
+	})
+
+	t.Run("comment errors", func(t *testing.T) {
+		otherCtx := bearerContext(t.Context(),
+			eu.AccessToken(t, userClaims("other", "user")))
+
+		payload := &newsdoc.Document{
+			Uuid: "6f1d1d8e-2b1a-4c55-9d7e-3a2f4b5c6d7e",
+			Type: "core/comment",
+			Content: []*newsdoc.Block{
+				{Type: "core/text", Data: map[string]string{"text": "Parity"}},
+			},
+		}
+
+		created, err := twirpClients.Comments.CreateComment(userCtx,
+			&user.CreateCommentRequest{
+				Uuid:         "c0000000-0000-4000-8000-000000000099",
+				ThreadUuid:   "b0000000-0000-4000-8000-000000000099",
+				DocumentUuid: "a0000000-0000-4000-8000-000000000099",
+				Payload:      payload,
+			})
+		test.Mustf(t, err, "create a comment")
+
+		edit := &user.UpdateCommentRequest{
+			Uuid:    created.Comment.Uuid,
+			Payload: payload,
+		}
+
+		_, twirpErr := twirpClients.Comments.UpdateComment(otherCtx, edit)
+		_, connectErr := connectClients.Comments.UpdateComment(otherCtx, edit)
+
+		check(t, connect.CodePermissionDenied, twirpErr, connectErr)
+
+		missing := &user.GetThreadRequest{
+			Uuid: "b0000000-0000-4000-8000-000000000098",
+		}
+
+		_, twirpErr = twirpClients.Comments.GetThread(userCtx, missing)
+		_, connectErr = connectClients.Comments.GetThread(userCtx, missing)
+
+		check(t, connect.CodeNotFound, twirpErr, connectErr)
+
+		_, err = twirpClients.Comments.DeleteComment(userCtx,
+			&user.DeleteCommentRequest{Uuid: created.Comment.Uuid})
+		test.Mustf(t, err, "delete the comment")
+
+		_, twirpErr = twirpClients.Comments.UpdateComment(userCtx, edit)
+		_, connectErr = connectClients.Comments.UpdateComment(userCtx, edit)
+
+		check(t, connect.CodeFailedPrecondition, twirpErr, connectErr)
+
+		noThread := &user.CreateCommentRequest{
+			Uuid:       "c0000000-0000-4000-8000-000000000098",
+			ThreadUuid: "b0000000-0000-4000-8000-000000000097",
+			Payload:    payload,
+		}
+
+		_, twirpErr = twirpClients.Comments.CreateComment(userCtx, noThread)
+		_, connectErr = connectClients.Comments.CreateComment(userCtx, noThread)
+
+		check(t, connect.CodeInvalidArgument, twirpErr, connectErr)
+
+		test.Equalf(t, "document_uuid", rpc.Meta(connectErr)["argument"],
+			"name the missing document in the metadata")
 	})
 
 	t.Run("wrong owner", func(t *testing.T) {

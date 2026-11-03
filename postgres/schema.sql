@@ -42,7 +42,8 @@ CREATE TYPE public.resource_kind AS ENUM (
 
 CREATE TYPE public.schema_usage AS ENUM (
     'settings',
-    'messages'
+    'messages',
+    'comments'
 );
 
 
@@ -60,6 +61,40 @@ CREATE TYPE public.user_kind AS ENUM (
 SET default_tablespace = '';
 
 SET default_table_access_method = heap;
+
+--
+-- Name: comment; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.comment (
+    uuid uuid NOT NULL,
+    thread_uuid uuid NOT NULL,
+    author text NOT NULL,
+    author_name text DEFAULT ''::text NOT NULL,
+    created timestamp with time zone NOT NULL,
+    updated timestamp with time zone NOT NULL,
+    deleted timestamp with time zone,
+    deleted_by text,
+    mentioned text[] DEFAULT '{}'::text[] NOT NULL,
+    payload jsonb NOT NULL
+);
+
+
+--
+-- Name: comment_thread; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.comment_thread (
+    uuid uuid NOT NULL,
+    document_uuid uuid NOT NULL,
+    kind text DEFAULT ''::text NOT NULL,
+    created timestamp with time zone NOT NULL,
+    created_by text NOT NULL,
+    updated timestamp with time zone NOT NULL,
+    resolved timestamp with time zone,
+    resolved_by text
+);
+
 
 --
 -- Name: config_generation; Type: TABLE; Schema: public; Owner: -
@@ -272,6 +307,22 @@ CREATE TABLE public."user" (
 
 
 --
+-- Name: comment comment_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.comment
+    ADD CONSTRAINT comment_pkey PRIMARY KEY (uuid);
+
+
+--
+-- Name: comment_thread comment_thread_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.comment_thread
+    ADD CONSTRAINT comment_thread_pkey PRIMARY KEY (uuid);
+
+
+--
 -- Name: config_generation config_generation_identity_hash_key; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -408,6 +459,27 @@ ALTER TABLE ONLY public."user"
 
 
 --
+-- Name: comment_mentioned_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX comment_mentioned_idx ON public.comment USING gin (mentioned);
+
+
+--
+-- Name: comment_thread_created_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX comment_thread_created_idx ON public.comment USING btree (thread_uuid, created, uuid);
+
+
+--
+-- Name: comment_thread_document_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX comment_thread_document_idx ON public.comment_thread USING btree (document_uuid, updated);
+
+
+--
 -- Name: config_generation_single_active; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -426,6 +498,14 @@ CREATE INDEX eventlog_owner_id_idx ON public.eventlog USING btree (owner, id);
 --
 
 CREATE INDEX inbox_message_recipient_id_idx ON public.inbox_message USING btree (recipient, id);
+
+
+--
+-- Name: comment comment_thread_uuid_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.comment
+    ADD CONSTRAINT comment_thread_uuid_fkey FOREIGN KEY (thread_uuid) REFERENCES public.comment_thread(uuid) ON DELETE CASCADE;
 
 
 --

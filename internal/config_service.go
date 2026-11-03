@@ -444,13 +444,16 @@ func schemaUsageFromRPC(usage user.SchemaUsage) (postgres.SchemaUsage, error) {
 		return postgres.SchemaUsageSettings, nil
 	case user.SchemaUsage_SCHEMA_USAGE_MESSAGES:
 		return postgres.SchemaUsageMessages, nil
+	case user.SchemaUsage_SCHEMA_USAGE_COMMENTS:
+		return postgres.SchemaUsageComments, nil
 	case user.SchemaUsage_SCHEMA_USAGE_UNSPECIFIED,
 		user.SchemaUsage_SCHEMA_USAGE_EDITORIAL,
 		user.SchemaUsage_SCHEMA_USAGE_DISTRIBUTION:
 		return "", fmt.Errorf(
-			"usage must be one of %q or %q",
+			"usage must be one of %q, %q or %q",
 			user.SchemaUsage_SCHEMA_USAGE_SETTINGS,
-			user.SchemaUsage_SCHEMA_USAGE_MESSAGES)
+			user.SchemaUsage_SCHEMA_USAGE_MESSAGES,
+			user.SchemaUsage_SCHEMA_USAGE_COMMENTS)
 	default:
 		return "", fmt.Errorf("unknown usage %d", usage)
 	}
@@ -462,6 +465,8 @@ func schemaUsageToRPC(usage postgres.SchemaUsage) user.SchemaUsage {
 		return user.SchemaUsage_SCHEMA_USAGE_SETTINGS
 	case postgres.SchemaUsageMessages:
 		return user.SchemaUsage_SCHEMA_USAGE_MESSAGES
+	case postgres.SchemaUsageComments:
+		return user.SchemaUsage_SCHEMA_USAGE_COMMENTS
 	default:
 		return user.SchemaUsage_SCHEMA_USAGE_UNSPECIFIED
 	}
