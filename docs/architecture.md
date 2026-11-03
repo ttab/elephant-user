@@ -32,7 +32,7 @@ main.go
               behind a bouncer (LISTEN + one spare), else the same pool as Main
   auth        = OIDC discovery + JWKS from OIDC_CONFIG
   metrics     = internal.NewMetrics(DefaultRegisterer)
-  store       = internal.NewPGStore(pools.Main)   FanOuts for the six NOTIFY channels
+  store       = internal.NewPGStore(pools.Main)   FanOuts for the seven NOTIFY channels
   validator   = internal.NewValidator(store)        loads active schemas, or fails startup
                 └─ go reloadLoop                    NOTIFY-driven, 5 min recheck
   subscriber  = store.NewSubscriber(pools.PubSub) one LISTEN connection, feeds the FanOuts
@@ -266,6 +266,58 @@ validation — the elephant client's BFF pushes `type: "rpc_error"` toasts and
 the clients poll them. The RPC shapes are frozen because those callers depend
 on them; do not extend them.
 
+### Comments
+
+Threads of comments on repository documents (`schema/006_comments.sql`,
+`internal/comments_store.go`):
+
+| Table | Holds |
+|---|---|
+| `comment_thread` | one row per thread: the repository document it is on, its kind, who started it, `updated` for list order, `resolved`/`resolved_by` (null while open) |
+| `comment` | one row per comment: thread, author and author name, `deleted`/`deleted_by` (null while live), `mentioned`, the payload |
+
+Both uuids are made by the client, which is what makes a retried write
+idempotent; there is no foreign key to the document, which lives in the
+repository, and none to `"user"`, since comments are keyed by the caller's
+subject as the inbox is. There is no sequence id and no log: nothing tails
+comments, display order inside a thread is `(created, uuid)`, and threads
+are listed by `updated`.
+
+**The thread row lock is the only lock a comment write takes.**
+`CreateComment` locks the thread with `SELECT ... FOR UPDATE`; when the
+thread does not exist yet it inserts it with `ON CONFLICT DO NOTHING` and
+locks it after, so two clients racing to create one thread both succeed and
+the loser's comment lands in the winner's thread. The comment's `created` is
+stamped after the lock is taken, so posts to one thread are stamped in commit
+order and the thread's `updated` ends at its newest comment. The comment
+insert also does nothing on conflict: a stored comment with the same uuid,
+thread and payload (compared as JSON, ignoring key order and whitespace) is
+answered as if just created, anything else is `already_exists`. A post to a
+resolved thread reopens it. `UpdateComment` and `DeleteComment` lock the
+comment row and then touch the thread, so every write takes at most one
+comment lock and then the thread lock, and none can deadlock another. An
+edit is the author's only and refused on a deleted comment; a delete is the
+author's or, with a flag the handler sets from `doc_admin`, anyone's, and
+deleting a deleted comment is a no-op. A delete keeps the row and its
+payload, but no read returns the payload or the mentions of a deleted
+comment. `ResolveThread` and `ReopenThread` lock the thread; resolving a
+resolved thread and reopening an open one change nothing and announce
+nothing. If a comment log is added, its counter is taken last, after the
+thread lock, as the eventlog rule requires.
+
+`mentioned` is derived in the store from the payload, the `uri` of every
+`rel: mention` link in the content blocks, deduplicated and sorted, and
+derived again on every edit; it is never taken from the caller. Its GIN index
+serves `ListMentions`, which answers references to live comments without
+their payload.
+
+Every write emits `pg_notify('comment_update')` inside its transaction with
+the event record `{type, document_uuid, thread_uuid, comment_uuid, actor,
+kind, mentioned, time}`; the first comment on a thread emits
+`thread_created` and `comment_created`, an implicit reopen adds
+`thread_reopened`. The mention list is truncated to keep the payload under
+the 8000 byte NOTIFY limit, which costs nothing since readers re-read.
+
 ### Retention cleaner
 
 `RunCleaner` (`internal/store.go`) runs under `joblock.Run` with lock name
@@ -284,7 +336,7 @@ elephantine's `docs/joblock-restart-semantics.md`.
 
 ## Real-time plumbing
 
-Six Postgres NOTIFY channels, one `pg.FanOut` each on `PGStore`, one LISTEN
+Seven Postgres NOTIFY channels, one `pg.FanOut` each on `PGStore`, one LISTEN
 connection per replica (`pg.Subscriber` on the direct pool):
 
 | Channel | Published by | Woken consumers |
@@ -295,6 +347,7 @@ connection per replica (`pg.Subscriber` on the direct pool):
 | `event_log_update` | every eventlog writer | `PollEventLog` handlers whose owner set contains the row's owner |
 | `schema_update` | generation activation | validator reload loop, `GetActiveConfigGeneration` long-polls |
 | `deprecation_update` | `UpdateDeprecation` | validator reload loop |
+| `comment_update` | every comment and thread write | nobody yet; the `Comments` FanOut is keyed by document uuid (`OnCommentUpdate`) |
 
 `pg_notify` is always issued inside the writing transaction; Postgres delivers
 it at commit and discards it on rollback. **LISTEN is a session-level command

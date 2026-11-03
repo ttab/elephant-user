@@ -399,6 +399,9 @@ type TestElephantUser struct {
 	Store     *internal.PGStore
 	Validator *internal.Validator
 	Registry  *prometheus.Registry
+	// DB is the test database, for tests that hold locks or inspect
+	// rows behind the store's back.
+	DB *pgxpool.Pool
 }
 
 // rpcStack is the protocol stack the test clients are built for. Both
@@ -579,6 +582,7 @@ func startElephantUser(t *testing.T) TestElephantUser {
 		Store:         store,
 		Validator:     validator,
 		Registry:      reg,
+		DB:            dbpool,
 	}
 }
 
