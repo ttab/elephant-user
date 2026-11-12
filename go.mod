@@ -11,7 +11,7 @@ require (
 	github.com/joho/godotenv v1.5.1
 	github.com/prometheus/client_golang v1.24.1
 	github.com/ttab/elephant-api v0.29.0
-	github.com/ttab/elephantine v0.30.2
+	github.com/ttab/elephantine v0.32.0
 	github.com/ttab/eltest v0.5.0
 	github.com/ttab/mage v0.15.0
 	github.com/ttab/newsdoc v1.1.0
