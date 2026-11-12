@@ -20,8 +20,11 @@ signal that shows each one. It does not explain how the code is built
 One process with three halves that fail independently:
 
 - **The API** — the Twirp and Connect services for settings documents, key-value properties,
-  system messages, inbox messages and schema configuration, all against
-  Postgres. Stateless; every replica serves everything.
+  system messages, inbox messages, comments on repository documents and schema
+  configuration, all against Postgres. Stateless; every replica serves everything.
+  The comments RPCs also ask elephant-repository for the caller's permission
+  on the document, the one call the service makes to another service; without
+  it they refuse and everything else keeps working.
 - **The LISTEN connection** — one per replica, on a direct Postgres
   connection, waking long-poll handlers and the schema validator. Without it
   the API keeps working but every long-poll takes its full timeout and a
@@ -41,7 +44,8 @@ down at once.
 | `ttab/elephant-user` | this service |
 | `ttab/elephant-api` | the protobuf definitions and the generated Twirp and Connect code for the `user` package; the elephant client's TypeScript client is generated from the same source |
 | `ttab/elephantine` | the shared framework: API server, auth middleware, job lock, LISTEN subscriber, metrics, graceful shutdown |
-| `ttab/revisor` | the newsdoc schema validator the settings and message documents are checked with |
+| `ttab/revisor` | the newsdoc schema validator the settings documents, messages and comment bodies are checked with |
+| `ttab/elephant-repository` | the document platform; its `Documents.GetPermissions`, called with the caller's token, decides who may read and write a comment thread |
 | `ttab/elephant-platform` | `setup db migrate`, the tool that applies this repository's migrations in hosted environments |
 | Keycloak | the OIDC provider that issues the JWTs and defines the scopes |
 
@@ -49,7 +53,7 @@ down at once.
 
 | Role | Configuration | Runs |
 |---|---|---|
-| API replica | `CONN_STRING` (direct), optional `BOUNCER_CONN_STRING`, `DB_MAX_CONNS` (16), `OIDC_CONFIG`, `CORS_HOSTS`, TLS paths | the API, its own LISTEN connection, and a candidate for the cleaner lock |
+| API replica | `CONN_STRING` (direct), optional `BOUNCER_CONN_STRING`, `DB_MAX_CONNS` (16), `OIDC_CONFIG`, `REPOSITORY_ENDPOINT`, `CORS_HOSTS`, TLS paths | the API, its own LISTEN connection, and a candidate for the cleaner lock |
 
 There is one role. Replicas scale RPC throughput and long-poll fan-out; each
 replica adds one LISTEN session to the direct database. The cleaner does not
@@ -63,16 +67,19 @@ does not need to.
 | Postgres, direct connection (`CONN_STRING`) | LISTEN/NOTIFY, and all queries unless a bouncer is configured | startup fails on the initial ping; at runtime every query fails and the `postgres` readiness entry reports it, but the probe stays green (see below) |
 | Postgres via PgBouncer (`BOUNCER_CONN_STRING`, optional) | all queries when configured | same as above for queries; LISTEN is unaffected because it never goes through the bouncer |
 | OIDC provider (`OIDC_CONFIG`) | discovery document and JWKS at startup, key refresh afterwards | startup fails; a running replica keeps validating with cached keys until a key rotates |
-| An active config generation | validating `UpdateDocument` and `PushInboxMessage` | those two RPCs fail with an internal error; everything else works; readiness reports `schemas` as failing but stays green |
+| elephant-repository (`REPOSITORY_ENDPOINT`, optional) | the caller's permissions on a document, for every `Comments` RPC but `ListMentions` | unset, those RPCs answer `permission_denied`; unreachable, `internal`, counted in `elephant_user_permission_lookups_total{outcome="error"}` |
+| An active config generation with all three usages | validating `UpdateDocument`, `PushInboxMessage`, `CreateComment`, `UpdateComment` | an RPC whose usage has no active schema fails as `internal`; readiness reports `schemas` failing but stays green |
 
 Truly required to start: Postgres and the OIDC provider. Truly required to
-serve every RPC: an active config generation.
+serve every RPC: an active config generation and, for the comments RPCs, a
+reachable repository. No readiness entry covers the repository; its signal is
+the lookup counter.
 
 ## Endpoints and ports
 
 | Port | Default | What is on it |
 |---|---|---|
-| API | `:1080` (`ADDR`) | `POST /twirp/elephant.user.{Settings,Messages,Configuration}/<Method>` (Twirp), `POST /elephant.user.{Settings,Messages,Configuration}/<Method>` (Connect, also gRPC), `GET /health/alive`, `GET /version` |
+| API | `:1080` (`ADDR`) | `POST /twirp/elephant.user.<Service>/<Method>` (Twirp) and `POST /elephant.user.<Service>/<Method>` (Connect, also gRPC) for `Settings`, `Messages`, `Comments`, `Configuration`; `GET /health/alive`, `GET /version` |
 | API, TLS | `:1443` (`TLS_ADDR`), only when `TLS_CERT_PATH` is set | the same, over TLS |
 | Profile | `:1081` (`PROFILE_ADDR`) | `GET /health/ready`, `GET /metrics`, `/debug/pprof/*`, `/debug/vars`, `/debug/bom` |
 
@@ -165,6 +172,33 @@ never postpones retention. `message_write_lock` rows are never deleted, so a
 recipient's ids keep counting up after their old messages are gone. Consumers should not treat
 `after_id` gaps at the low end as missing messages.
 
+### 5. A comment write
+
+```
+editor ── CreateComment(uuid, thread_uuid, document_uuid, payload) ──► replica
+                          │ scope user
+                          │ thread exists? its document decides; else document_uuid
+                          │ GetPermissions(document) on elephant-repository   ← caller's token,
+                          │   write granted? else permission_denied              cached 30 s
+                          │ validate against the comments schema, inline id check
+                          │ BEGIN
+                          │   SELECT comment_thread FOR UPDATE                  ← the only lock
+                          │     missing: INSERT ... ON CONFLICT DO NOTHING, lock again
+                          │   INSERT comment ON CONFLICT DO NOTHING             ← retry? answer it
+                          │   bump thread updated (reopen if resolved)
+                          │   pg_notify('comment_update', event)
+                          │ COMMIT
+                          ▼
+              every replica: WaitForComments handlers waiting on the document
+              └─ answer the document uuid; the client re-lists its threads
+```
+
+The weight here is outside the database: every comments RPC but
+`ListMentions` waits for the repository on a cache miss, so a slow repository
+is a slow comments API. Posts to one thread serialise on its row, which is
+microseconds. Nothing is retained or swept: comments and deleted comments stay
+until something else removes them.
+
 ## Single-leader work
 
 | Lock | Does | When nobody holds it |
@@ -184,13 +218,16 @@ Everything is in Postgres and Postgres is authoritative for all of it.
 | `message` | system messages by `(recipient, id)` | retention 2 weeks |
 | `inbox_message` | one row per inbox message, `id` global, unique `(recipient, uuid)` | retention 6 months |
 | `inbox_message_state` | one reader's `is_read`/`hidden` per message | absent means unread and visible; cascades with the message |
+| `comment_thread` | one row per thread, keyed by the client's uuid, with the repository document it is on | no FK to the document; never deleted |
+| `comment` | one row per comment, payload and derived `mentioned` | a deleted comment keeps its row and payload; no retention |
 | `message_write_lock` | per-recipient id counters for `message` | never cleaned |
 | `document_schema`, `config_generation`, `config_generation_schema`, `deprecation` | schema configuration | exactly one generation is active |
 | `job_lock` | the cleaner lock | rows are transient |
 | `schema_version` | tern's migration marker | |
 
-Nothing is cached outside the process except the validators, which are
-rebuilt from `document_schema` on every reload.
+Two things are cached in the process: the validators, rebuilt from
+`document_schema` on every reload, and the repository's permission answers,
+kept 30 s per subject and document and lost on restart.
 
 ## Migrations
 
@@ -240,6 +277,14 @@ those rows. Run the migration before the deploy; no service window is
 needed because no caller is affected, but old code cannot write the new
 table, so do not deploy first. Rollback recreates the old table, empty.
 
+`schema/006_comments.sql` (v1.9.0) adds the `comment_thread` and `comment`
+tables and the `comments` value of `schema_usage`. It touches no existing
+row and old code ignores what it adds: run it before the deploy, no service
+window. Deployed without it, every comments write and read fails as
+`internal`. Postgres cannot drop an enum value, so a rollback drops the two
+tables, and every comment with them, and leaves `comments` in the type; the
+migration adds it with `IF NOT EXISTS` and can run again on top of it.
+
 The `job_lock` table is elephantine's; `schema/vendor.json` declares that and
 `001_messages.sql` asserts it created the table by hand
 (`-- covers:`). `go test ./schema/` fails when elephantine ships a migration
@@ -247,24 +292,34 @@ this service has not taken.
 
 ## Bootstrap order — read this before starting a new environment
 
-1. Postgres exists and the migrations are applied (step 2 above, or `mage
-   sql:db && mage sql:migrate` locally).
+1. Postgres exists and the migrations are applied (`go run ./cmd/setup db
+   migrate` in elephant-platform, or `mage sql:db && mage sql:migrate`
+   locally).
 2. Keycloak knows the scopes: `user`, `doc_admin`, `schema_admin`,
-   `schema_read`.
-3. Deploy. The service starts with no active generation; `/health/ready` is
+   `schema_read`. Commenting also needs a repository document scope on the
+   caller's token, since the repository refuses `GetPermissions` without one:
+   a client on client credentials that is to comment, such as an agent, needs
+   `doc_read` or a broader document scope as well as `user`.
+3. `REPOSITORY_ENDPOINT` points at elephant-repository and is reachable from
+   the pods. The repository needs nothing for this: the caller's own token is
+   forwarded, and this service holds no credentials of its own.
+4. Deploy. The service starts with no active generation; `/health/ready` is
    green with `schemas` reported as failing.
-4. Register and activate the initial generation with a `schema_admin` token:
-   `RegisterConfigGeneration` with the two seed schemas
-   `se.ecms.user.settings@v1.1.0` and `se.ecms.user.messages@v1.0.0` (the
-   versions are in `EmbeddedConfigSchemas`, the specs are the embedded files in
-   `internal/`) and `activate: true`. See
+5. Register and activate the initial generation with a `schema_admin` token:
+   `RegisterConfigGeneration` with the three seed schemas
+   `se.ecms.user.settings@v1.1.0`, `se.ecms.user.messages@v1.0.0` and
+   `se.ecms.user.comments@v1.0.0` (the versions are in
+   `EmbeddedConfigSchemas`, the specs are the embedded files in `internal/`)
+   and `activate: true`. See
    [Common operations](#common-operations).
-5. Route traffic.
+6. Route traffic.
 
-Out of order: traffic before step 4 means every `UpdateDocument` and
-`PushInboxMessage` fails with an internal error until the generation is
-active. Nothing is lost — the writes are refused, not dropped — but the
-elephant client shows failed saves.
+Out of order: traffic before step 5 means every `UpdateDocument`,
+`PushInboxMessage`, `CreateComment` and `UpdateComment` fails with an internal
+error until the generation is active. Nothing is lost, since the writes are
+refused rather than dropped, but the elephant client shows failed saves.
+Without step 3, every comments RPC but `ListMentions` answers
+`permission_denied`.
 
 ## Failure modes
 
@@ -272,13 +327,60 @@ elephant client shows failed saves.
 
 `UpdateDocument` and `PushInboxMessage` return `internal` and the log says
 `no active schema for usage "settings"` (or `"messages"`). No generation is
-active, or the active one lacks a usage.
+active, or the active one lacks a usage. `CreateComment` and `UpdateComment`
+fail the same way with `"comments"`. The `schemas` readiness entry requires
+all three usages, so an environment whose active generation predates the
+comments schema reports it as failing until a generation with
+`se.ecms.user.comments` is activated.
 
 Signal: `health_check_up{name="schemas"} == 0`; `rpc_responses_total{method="UpdateDocument",status="500"}`.
 
 Action: `GetActiveConfigGeneration` to see what is active;
 `ListConfigGenerations` to find the intended one; `ActivateConfigGeneration`
-or register a generation that covers both usages.
+or register a generation that covers every usage.
+
+### Every comments RPC is refused with `permission_denied`
+
+The service is not asking the repository, or the repository refuses the
+token. With `REPOSITORY_ENDPOINT` empty no lookup is made at all and every
+document check fails closed. A token without a repository document scope
+(`doc_read`, `doc_read_all`, `doc_write`, `doc_delete`, `doc_admin`) is
+refused by the repository before it reads the ACL, and that refusal is
+answered as nothing granted; typical for an agent or another client on client
+credentials that has `user` only. If neither, the ACL really does not grant
+the caller the document.
+
+Signal: `elephant_user_permission_lookups_total` not moving while
+`rpc_requests_total{service="Comments"}` does means the endpoint is unset;
+`outcome="denied"` rising means tokens without a document scope.
+
+Action: set `REPOSITORY_ENDPOINT`, or grant the client `doc_read` (or the
+document scope it should have) in Keycloak. A refusal is cached for 30 s, so
+a fixed token is let in within that window.
+
+### Comments RPCs fail with an internal error while the rest of the API works
+
+The permission lookup is failing: the repository is down, unreachable,
+answering errors, or slower than the 5 s client timeout. Failed lookups are
+not cached, so every call retries the repository and the RPCs recover as soon
+as it does. `ListMentions` keeps working because it checks no document.
+
+Signal: `elephant_user_permission_lookups_total{outcome="error"}` rising;
+`client_requests_total{client="repository"}` by `code` and
+`client_request_duration_seconds{client="repository"}` say whether it is
+refusing or slow.
+
+Action: this is the repository's incident, not this service's; check
+`REPOSITORY_ENDPOINT` resolves from the pod if the repository itself is
+healthy.
+
+### A user who was just given access to a document still cannot comment
+
+Permission answers, refusals included, are cached for 30 s per subject and
+document and not extended by use. An ACL change reaches the comments RPCs
+within that window, in both directions: a user who lost access keeps it for
+as long. Expected; nothing to do but wait 30 s. A restart clears the cache of
+that replica only.
 
 ### A settings change does not show up in another tab for 30 seconds
 
@@ -406,9 +508,9 @@ overwrote the first; the eventlog shows both versions. Known limitation; an
 ## Common operations
 
 **Register and activate the seed schemas.** Needs a token with `schema_admin`.
-The request is a `RegisterConfigGenerationRequest` with the two embedded
-constraint sets as `spec` strings, `usage` set to `SCHEMA_USAGE_SETTINGS` and
-`SCHEMA_USAGE_MESSAGES`, and `activate: true`:
+The request is a `RegisterConfigGenerationRequest` with the three embedded
+constraint sets as `spec` strings, `usage` set to `SCHEMA_USAGE_SETTINGS`,
+`SCHEMA_USAGE_MESSAGES` and `SCHEMA_USAGE_COMMENTS`, and `activate: true`:
 
 ```sh
 curl -sS -X POST "$USER_API/twirp/elephant.user.Configuration/RegisterConfigGeneration" \
@@ -461,11 +563,15 @@ Scopes and what they grant:
 
 | Scope | Grants |
 |---|---|
-| `user` | all `Settings` and `Messages` RPCs on the caller's own data; reading shared docs and inbox messages addressed to the caller's org or units; pushing system messages and inbox messages to a user |
-| `doc_admin` | writing settings documents owned by, and pushing inbox messages to, an org or unit the caller belongs to |
+| `user` | all `Settings` and `Messages` RPCs on the caller's own data; reading shared docs and inbox messages addressed to the caller's org or units; pushing system messages and inbox messages to a user; the `Comments` RPCs, with a document permission |
+| `doc_admin` | writing settings documents owned by, and pushing inbox messages to, an org or unit the caller belongs to; deleting another author's comment on a document the caller may write |
 | `schema_admin` | registering and activating config generations, toggling deprecations |
 | `schema_read` | reading generations, schemas and deprecations |
 
+The scopes do not decide comment access: the repository does, from the
+document's ACL and the caller's own document scopes, so a token that is to
+comment needs a repository document scope such as `doc_read` beside `user`
+(see [Bootstrap order](#bootstrap-order--read-this-before-starting-a-new-environment)).
 A `schema_admin` token also administers schemas on elephant-repository; the
 scope is shared by design. Identity is claims only — the service has no
 directory and trusts `org` and `units` as the token states them. Pushed
@@ -473,9 +579,11 @@ messages record the token's `sub` as `created_by`, so a sender cannot
 impersonate another sender, but any `user` token can push to any recipient.
 
 Outbound: the OIDC discovery document and JWKS at startup and on key
-rotation. Nothing else leaves the process. Secrets are the database
-connection strings and, if a confidential client is configured, the
-OIDC client secret; all arrive as environment variables. The profile port is
+rotation, and, when `REPOSITORY_ENDPOINT` is set, `GetPermissions` calls to
+elephant-repository carrying the caller's own bearer token. The service holds
+no token of its own for the repository. Nothing else leaves the process.
+Secrets are the database connection strings and, if a confidential client is
+configured, the OIDC client secret; all arrive as environment variables. The profile port is
 unauthenticated and internal only.
 
 ## Not in place yet
@@ -486,6 +594,12 @@ unauthenticated and internal only.
 - **Another tab does not see a read-state change until it re-lists.**
   `inbox_state_update` is emitted but nothing delivers it to clients yet;
   that is the notification stream's job.
+- **A comment change between two `WaitForComments` calls is missed.** The
+  wait has no cursor because comments have no log; clients list the threads
+  before the first wait and after every answer. A comment log replaces it.
+- **No readiness entry for the repository.** An unset or unreachable
+  `REPOSITORY_ENDPOINT` shows only in the comments RPCs and
+  `elephant_user_permission_lookups_total`.
 - **Twirp is still served.** The `/twirp/` mount goes in the next major
   release, once `rpc_protocol_responses_total{protocol="twirp"}` is zero for
   every method and the remaining `client_id`s have been told.

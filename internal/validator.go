@@ -26,6 +26,9 @@ var schemaMessages []byte
 //go:embed se.ecms.user.settings.json
 var schemaSettings []byte
 
+//go:embed se.ecms.user.comments.json
+var schemaComments []byte
+
 // EmbeddedConfigSchemas returns the embedded constraint sets as
 // register-ready config schemas. Used to seed environments and tests.
 func EmbeddedConfigSchemas() []ConfigSchema {
@@ -41,6 +44,12 @@ func EmbeddedConfigSchemas() []ConfigSchema {
 			Version: "v1.0.0",
 			Spec:    schemaMessages,
 			Usage:   postgres.SchemaUsageMessages,
+		},
+		{
+			Name:    "se.ecms.user.comments",
+			Version: "v1.0.0",
+			Spec:    schemaComments,
+			Usage:   postgres.SchemaUsageComments,
 		},
 	}
 }

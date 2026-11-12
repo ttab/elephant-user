@@ -1,0 +1,42 @@
+{
+  "body": {
+    "thread": {
+      "comments": [
+        {
+          "author": "core://user/tester",
+          "mentioned": [
+            "core://user/anna"
+          ],
+          "payload": {
+            "content": [
+              {
+                "data": {
+                  "text": "Ask \u003cmention id=\"m1\"\u003eAnna\u003c/mention\u003e."
+                },
+                "links": [
+                  {
+                    "id": "m1",
+                    "rel": "mention",
+                    "type": "tt/keycloak",
+                    "uri": "core://user/anna"
+                  }
+                ],
+                "type": "core/text"
+              }
+            ],
+            "type": "core/comment",
+            "uuid": "6f1d1d8e-2b1a-4c55-9d7e-3a2f4b5c6d7e"
+          },
+          "threadUuid": "b0000000-0000-4000-8000-000000000001",
+          "uuid": "c0000000-0000-4000-8000-000000000001"
+        }
+      ],
+      "createdBy": "core://user/tester",
+      "documentUuid": "a0000000-0000-4000-8000-000000000001",
+      "kind": "factcheck",
+      "liveComments": "1",
+      "uuid": "b0000000-0000-4000-8000-000000000001"
+    }
+  },
+  "status": 200
+}

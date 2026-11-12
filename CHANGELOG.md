@@ -4,6 +4,61 @@ All notable changes to elephant-user from v1.0.0 onwards are documented here.
 Entries are derived from the release tags; the linked pull requests hold the
 detail. Earlier history is not reconstructed.
 
+## [v1.9.0] - Unreleased
+
+**New API (comments):** a fourth service, `Comments`, holds threads of
+comments on repository documents: `CreateComment`, `UpdateComment`,
+`DeleteComment`, `GetThread`, `ListThreads`, `ResolveThread`, `ReopenThread`,
+`ListMentions` and `WaitForComments`, on the Twirp and Connect paths. Every
+RPC needs the `user` scope and then read or write permission on the document
+as elephant-repository answers it for the caller's own token, so a calling
+token also needs a repository document scope such as `doc_read`; `ListMentions`
+checks no document. `doc_admin` also lets a caller delete another author's
+comment. `WaitForComments` has no cursor: list the threads before the first
+wait. Permissions and error codes per RPC are in
+[RPC APIs](docs/architecture.md#rpc-apis).
+
+**Before first use (comments):** set `--repository-endpoint`
+(`REPOSITORY_ENDPOINT`) to elephant-repository's base URL; without it every
+`Comments` RPC but `ListMentions` answers `permission_denied`. Grant `doc_read`
+to any client-credentials client that is to comment. After the deploy,
+register and activate a generation that adds `se.ecms.user.comments@v1.0.0`;
+until then `CreateComment` and `UpdateComment` fail as `internal`. See
+[Bootstrap order](docs/ops.md#bootstrap-order--read-this-before-starting-a-new-environment).
+
+**Behaviour change (readiness):** the optional `schemas` readiness entry now
+also requires an active schema for the `comments` usage, so it reports failing
+until a generation with the comments schema is active. The probe stays green.
+
+**Migrations:**
+
+- `schema/006_comments.sql` creates the `comment_thread` and `comment` tables
+  and adds `comments` to the `schema_usage` enum. Run it before the deploy; no
+  service window. A rollback drops the tables but cannot remove the enum
+  value.
+
+Changes:
+
+- New `Comments` service: client-made thread and comment uuids with
+  idempotent creates, mentions derived from the payload's `rel: mention`
+  links, deleted comments kept in their thread without their payload, and a
+  post to a resolved thread reopening it. Inline `<mention id>` and `<a id>`
+  elements must be bound to a link with the same id in their block.
+- New schema usage `comments` (`SCHEMA_USAGE_COMMENTS`), accepted by
+  `RegisterConfigGeneration`, and a new embedded schema
+  `se.ecms.user.comments@v1.0.0` declaring the `core/comment` body.
+- New optional `--repository-endpoint` flag (`REPOSITORY_ENDPOINT`). Document
+  permissions are cached for 30 s per caller and document, so an ACL change
+  reaches comments within that window.
+- New metric `elephant_user_permission_lookups_total{outcome}` and the
+  `client_*` series for the `repository` client; see
+  [Repository permissions](docs/observability.md#repository-permissions).
+- Dependency upgrades: elephant-api to v0.29.0, the release carrying the
+  `Comments` service and `SCHEMA_USAGE_COMMENTS`.
+- Documentation: the comments vocabulary in `CONTEXT.md`, and
+  [ADR-0002](docs/adr/0002-comment-access-follows-the-repository-document.md)
+  on why comment access follows the repository document.
+
 ## [v1.8.0] - 2026-10-14
 
 **Behaviour change (settings schema):** the embedded settings schema is now

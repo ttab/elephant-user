@@ -2,9 +2,10 @@
 
 The per-user data service of the Elephant platform: settings documents and
 properties per owner, durable inbox messages addressed to users, units and
-orgs, ephemeral system messages, and the revisor schemas those documents are
-validated against. Document, NewsDoc, version, scope, eventlog and the other
-platform terms are defined by
+orgs, ephemeral system messages, comment threads on repository documents, and
+the revisor schemas those documents are validated against. Document, NewsDoc,
+version, ACL, permission, scope, eventlog and the other platform terms are
+defined by
 [elephant-repository's glossary](https://github.com/ttab/elephant-repository/blob/main/CONTEXT.md)
 and are not redefined here; where a term below narrows one of them, it says
 so.
@@ -102,13 +103,75 @@ documents and properties only, tailed with `PollEventLog`. Inbox messages do
 not enter it; the inbox table is its own log.
 _Avoid_: Audit log, history
 
+### Comments
+
+How threads are stored and checked is in
+[`docs/architecture.md`](docs/architecture.md#comments); why access follows
+the document is
+[ADR-0002](docs/adr/0002-comment-access-follows-the-repository-document.md).
+
+**Thread**:
+A flat, ordered list of comments on one repository document, identified by a
+uuid the client makes. Its first comment creates it; it is resolved and
+reopened as a whole and never deleted. There are no replies or sub-threads.
+_Avoid_: Conversation, discussion, sub-thread
+
+**Comment**:
+One entry in a thread: a NewsDoc document of type `core/comment`, validated
+under the `comments` usage, written by its author's subject and edited by
+that subject only. Its uuid is the client's.
+_Avoid_: Note, reply, annotation
+
+**Anchor**:
+The element in a repository document's text whose id is a thread's uuid,
+placing the thread on a span. It lives in the document, not here: the service
+never reads it, a thread without one is about the whole document, and an
+anchor without a thread is one not saved yet.
+_Avoid_: Marker, highlight
+
+**Kind**:
+An open string a thread is created with, such as `factcheck`, possibly empty.
+A label for clients, fixed for the thread's life; not a schema usage and not
+a permission.
+_Avoid_: Type, category
+
+**Mention**:
+A `rel: mention` link in a comment's text block, bound by id to a `<mention>`
+element, whose `uri` is a subject. The service derives a comment's mentioned
+subjects from these links on every write and never takes them from the
+caller. Nothing is delivered to the mentioned subject; `ListMentions` is how
+they find out.
+_Avoid_: Tag, notification
+
+**Deleted comment**:
+A comment its author, or a `doc_admin`, has deleted. It stays in its thread
+with `deleted` and `deleted_by` set, and no read returns its payload or its
+mentions. A thread counts only its live comments; one with none left can have
+its anchor removed.
+_Avoid_: Tombstone, soft delete, removed comment
+
+**Document permission**:
+The caller's read, write or meta write on a repository document, as the
+repository's `GetPermissions` answers it for the caller's own token. The
+repository owns the ACL and the permission; this service only asks, caches
+the answer for 30 s, and gates every thread on it. Not a scope, and not an
+ACL kept here.
+_Avoid_: Thread ACL, comment scope
+
+**Wakeup poll**:
+A long poll with no cursor that answers which documents changed, never what
+changed: `WaitForComments`. The caller re-reads, and a change between two
+calls is not reported. Not a cursor poll like `PollEventLog`, and not a
+comment stream, which does not exist yet.
+_Avoid_: Subscription, comment feed
+
 ### Ids and streams
 
 **Commit-ordered id**:
 An id handed out by a `sequence_counter` row inside the writing transaction,
 so that id order equals commit order and a cursor never skips an entry. Both
 the eventlog and the inbox use one; system messages use a per-recipient
-counter.
+counter; comments have none yet, since nothing tails them.
 _Avoid_: Serial, sequence (the Postgres object, which is what this replaces)
 
 **Cursor**:
@@ -131,6 +194,6 @@ service, never seeded by the service itself.
 _Avoid_: Schema set, schema version (that is one schema's version)
 
 **Usage**:
-Which kind of document a schema validates: `SETTINGS` or `MESSAGES`. A
-schema validates only its own usage.
-_Avoid_: Kind, category
+Which kind of document a schema validates: `SETTINGS`, `MESSAGES` or
+`COMMENTS`. A schema validates only its own usage.
+_Avoid_: Kind (that is a thread's label), category

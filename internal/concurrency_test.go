@@ -1,13 +1,16 @@
 package internal_test
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/ttab/elephant-api/newsdoc"
 	"github.com/ttab/elephant-user/internal"
 	"github.com/ttab/elephantine/test"
@@ -473,4 +476,245 @@ func TestConcurrentInboxPushes(t *testing.T) {
 	}
 
 	test.Equalf(t, 1, stored, "the document is stored once")
+}
+
+// TestConcurrentCommentThreadCreate verifies that clients racing to create
+// the same thread, each with its own first comment, all succeed and land in
+// one thread. The thread insert does nothing on conflict and the thread is
+// read back under its row lock, so the losers attach to the winner's
+// thread; a plain insert fails them with a primary key violation.
+func TestConcurrentCommentThreadCreate(t *testing.T) {
+	eu := startElephantUser(t)
+	ctx := t.Context()
+
+	const (
+		rounds  = 20
+		writers = 8
+	)
+
+	docUUID := uuid.New()
+
+	for round := range rounds {
+		threadUUID := uuid.New()
+
+		var (
+			start = make(chan struct{})
+			wg    sync.WaitGroup
+		)
+
+		for i := range writers {
+			wg.Go(func() {
+				payload, err := json.Marshal(&newsdoc.Document{
+					Uuid:  uuid.NewString(),
+					Type:  "core/comment",
+					Title: fmt.Sprintf("Comment %d", i),
+				})
+				if err != nil {
+					t.Errorf("round %d writer %d: marshal payload: %v", round, i, err)
+
+					return
+				}
+
+				<-start
+
+				_, thread, err := eu.Store.CreateComment(ctx, internal.Comment{
+					UUID:       uuid.New(),
+					ThreadUUID: threadUUID,
+					Author:     fmt.Sprintf("core://user/writer-%d", i),
+					Payload:    payload,
+				}, docUUID, "factcheck")
+				if err != nil {
+					t.Errorf("round %d writer %d: %v", round, i, err)
+
+					return
+				}
+
+				if thread.UUID != threadUUID {
+					t.Errorf("round %d writer %d: answered thread %s",
+						round, i, thread.UUID)
+				}
+			})
+		}
+
+		close(start)
+		wg.Wait()
+
+		if t.Failed() {
+			return
+		}
+
+		thread, err := eu.Store.GetThread(ctx, threadUUID)
+		test.Mustf(t, err, "round %d: get the thread", round)
+
+		test.Equalf(t, writers, len(thread.Comments),
+			"round %d: every comment landed in the one thread", round)
+		test.Equalf(t, int64(writers), thread.LiveComments,
+			"round %d: live comments", round)
+	}
+
+	threads, err := eu.Store.ListThreads(ctx, docUUID, true)
+	test.Mustf(t, err, "list threads")
+
+	test.Equalf(t, rounds, len(threads), "one thread per round")
+}
+
+// TestConcurrentCommentPosts verifies that concurrent posts to one thread
+// serialise on the thread row lock and all land. The post stamps its
+// comment after taking the lock, so stamps follow commit order and the
+// thread's updated time ends at the newest comment. Without the lock a post
+// stamped earlier can touch the thread after one stamped later, leaving the
+// thread older than its newest comment; that race is probabilistic and
+// rarely hit, so the second half holds the lock from outside and checks
+// deterministically that posts wait for it before stamping.
+func TestConcurrentCommentPosts(t *testing.T) {
+	eu := startElephantUser(t)
+	ctx := t.Context()
+
+	const (
+		writers        = 8
+		postsPerWriter = 25
+	)
+
+	docUUID := uuid.New()
+	threadUUID := uuid.New()
+
+	payload := func(title string) []byte {
+		data, err := json.Marshal(&newsdoc.Document{
+			Uuid:  uuid.NewString(),
+			Type:  "core/comment",
+			Title: title,
+		})
+		test.Mustf(t, err, "marshal payload")
+
+		return data
+	}
+
+	_, _, err := eu.Store.CreateComment(ctx, internal.Comment{
+		UUID:       uuid.New(),
+		ThreadUUID: threadUUID,
+		Author:     "core://user/starter",
+		Payload:    payload("Start"),
+	}, docUUID, "")
+	test.Mustf(t, err, "start the thread")
+
+	var (
+		start = make(chan struct{})
+		wg    sync.WaitGroup
+	)
+
+	for w := range writers {
+		payloads := make([][]byte, postsPerWriter)
+		for i := range payloads {
+			payloads[i] = payload(fmt.Sprintf("w%d-%d", w, i))
+		}
+
+		wg.Go(func() {
+			<-start
+
+			for i := range postsPerWriter {
+				_, _, err := eu.Store.CreateComment(ctx, internal.Comment{
+					UUID:       uuid.New(),
+					ThreadUUID: threadUUID,
+					Author:     fmt.Sprintf("core://user/writer-%d", w),
+					Payload:    payloads[i],
+				}, uuid.Nil, "")
+				if err != nil {
+					t.Errorf("writer %d post %d: %v", w, i, err)
+
+					return
+				}
+			}
+		})
+	}
+
+	close(start)
+	wg.Wait()
+
+	if t.Failed() {
+		return
+	}
+
+	thread, err := eu.Store.GetThread(ctx, threadUUID)
+	test.Mustf(t, err, "get the thread")
+
+	want := writers*postsPerWriter + 1
+
+	test.Equalf(t, want, len(thread.Comments), "every post landed")
+	test.Equalf(t, int64(want), thread.LiveComments, "live comments")
+
+	newest := thread.Comments[len(thread.Comments)-1].Created
+
+	if !thread.Updated.Equal(newest) {
+		t.Fatalf("thread updated %s is not the newest comment's created %s",
+			thread.Updated.Format(time.RFC3339Nano),
+			newest.Format(time.RFC3339Nano))
+	}
+
+	// Hold the thread row lock from outside the store while posts start.
+	// Every post must wait for it before stamping its comment, so every
+	// comment is created after the lock is released. A post that stamps
+	// before taking the lock, or never takes it, is created while the
+	// lock is still held.
+	tx, err := eu.DB.Begin(ctx)
+	test.Mustf(t, err, "begin the lock holder")
+
+	defer func() {
+		err := tx.Rollback(context.Background())
+		if err != nil && !errors.Is(err, pgx.ErrTxClosed) {
+			t.Errorf("roll back the lock holder: %v", err)
+		}
+	}()
+
+	_, err = tx.Exec(ctx,
+		"SELECT uuid FROM comment_thread WHERE uuid = $1 FOR UPDATE", threadUUID)
+	test.Mustf(t, err, "lock the thread row")
+
+	const held = 4
+
+	var (
+		heldWG  sync.WaitGroup
+		created = make(chan time.Time, held)
+	)
+
+	for i := range held {
+		data := payload(fmt.Sprintf("held-%d", i))
+
+		heldWG.Go(func() {
+			c, _, err := eu.Store.CreateComment(ctx, internal.Comment{
+				UUID:       uuid.New(),
+				ThreadUUID: threadUUID,
+				Author:     "core://user/held",
+				Payload:    data,
+			}, uuid.Nil, "")
+			if err != nil {
+				t.Errorf("held post %d: %v", i, err)
+
+				return
+			}
+
+			created <- c.Created
+		})
+	}
+
+	// Let the posts reach the lock.
+	time.Sleep(200 * time.Millisecond)
+
+	released := time.Now()
+
+	err = tx.Commit(ctx)
+	test.Mustf(t, err, "release the thread row lock")
+
+	heldWG.Wait()
+	close(created)
+
+	if t.Failed() {
+		return
+	}
+
+	for c := range created {
+		if !c.After(released) {
+			t.Fatalf("a post was stamped at %s, before the lock was released at %s",
+				c.Format(time.RFC3339Nano), released.Format(time.RFC3339Nano))
+		}
+	}
 }

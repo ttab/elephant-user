@@ -32,6 +32,24 @@ func (q *Queries) DeactivateActiveConfigGeneration(ctx context.Context, excludeI
 	return err
 }
 
+const deleteComment = `-- name: DeleteComment :exec
+UPDATE comment
+SET deleted = $1,
+    deleted_by = $2
+WHERE uuid = $3
+`
+
+type DeleteCommentParams struct {
+	Deleted   pgtype.Timestamptz
+	DeletedBy pgtype.Text
+	UUID      uuid.UUID
+}
+
+func (q *Queries) DeleteComment(ctx context.Context, arg DeleteCommentParams) error {
+	_, err := q.db.Exec(ctx, deleteComment, arg.Deleted, arg.DeletedBy, arg.UUID)
+	return err
+}
+
 const deleteDocument = `-- name: DeleteDocument :one
 DELETE FROM document
 WHERE owner = $1
@@ -207,6 +225,119 @@ func (q *Queries) GetActiveSchemas(ctx context.Context) ([]GetActiveSchemasRow, 
 		return nil, err
 	}
 	return items, nil
+}
+
+const getComment = `-- name: GetComment :one
+SELECT uuid, thread_uuid, author, author_name, created, updated,
+       deleted, deleted_by, mentioned, payload
+FROM comment
+WHERE uuid = $1
+`
+
+func (q *Queries) GetComment(ctx context.Context, argUuid uuid.UUID) (Comment, error) {
+	row := q.db.QueryRow(ctx, getComment, argUuid)
+	var i Comment
+	err := row.Scan(
+		&i.UUID,
+		&i.ThreadUuid,
+		&i.Author,
+		&i.AuthorName,
+		&i.Created,
+		&i.Updated,
+		&i.Deleted,
+		&i.DeletedBy,
+		&i.Mentioned,
+		&i.Payload,
+	)
+	return i, err
+}
+
+const getCommentForUpdate = `-- name: GetCommentForUpdate :one
+SELECT uuid, thread_uuid, author, author_name, created, updated,
+       deleted, deleted_by, mentioned, payload
+FROM comment
+WHERE uuid = $1
+FOR UPDATE
+`
+
+func (q *Queries) GetCommentForUpdate(ctx context.Context, argUuid uuid.UUID) (Comment, error) {
+	row := q.db.QueryRow(ctx, getCommentForUpdate, argUuid)
+	var i Comment
+	err := row.Scan(
+		&i.UUID,
+		&i.ThreadUuid,
+		&i.Author,
+		&i.AuthorName,
+		&i.Created,
+		&i.Updated,
+		&i.Deleted,
+		&i.DeletedBy,
+		&i.Mentioned,
+		&i.Payload,
+	)
+	return i, err
+}
+
+const getCommentThread = `-- name: GetCommentThread :one
+SELECT t.uuid, t.document_uuid, t.kind, t.created, t.created_by, t.updated,
+       t.resolved, t.resolved_by,
+       (SELECT COUNT(*) FROM comment AS c
+        WHERE c.thread_uuid = t.uuid AND c.deleted IS NULL)::bigint AS live_comments
+FROM comment_thread AS t
+WHERE t.uuid = $1
+`
+
+type GetCommentThreadRow struct {
+	UUID         uuid.UUID
+	DocumentUuid uuid.UUID
+	Kind         string
+	Created      pgtype.Timestamptz
+	CreatedBy    string
+	Updated      pgtype.Timestamptz
+	Resolved     pgtype.Timestamptz
+	ResolvedBy   pgtype.Text
+	LiveComments int64
+}
+
+func (q *Queries) GetCommentThread(ctx context.Context, argUuid uuid.UUID) (GetCommentThreadRow, error) {
+	row := q.db.QueryRow(ctx, getCommentThread, argUuid)
+	var i GetCommentThreadRow
+	err := row.Scan(
+		&i.UUID,
+		&i.DocumentUuid,
+		&i.Kind,
+		&i.Created,
+		&i.CreatedBy,
+		&i.Updated,
+		&i.Resolved,
+		&i.ResolvedBy,
+		&i.LiveComments,
+	)
+	return i, err
+}
+
+const getCommentThreadForUpdate = `-- name: GetCommentThreadForUpdate :one
+SELECT uuid, document_uuid, kind, created, created_by, updated,
+       resolved, resolved_by
+FROM comment_thread
+WHERE uuid = $1
+FOR UPDATE
+`
+
+func (q *Queries) GetCommentThreadForUpdate(ctx context.Context, argUuid uuid.UUID) (CommentThread, error) {
+	row := q.db.QueryRow(ctx, getCommentThreadForUpdate, argUuid)
+	var i CommentThread
+	err := row.Scan(
+		&i.UUID,
+		&i.DocumentUuid,
+		&i.Kind,
+		&i.Created,
+		&i.CreatedBy,
+		&i.Updated,
+		&i.Resolved,
+		&i.ResolvedBy,
+	)
+	return i, err
 }
 
 const getConfigGeneration = `-- name: GetConfigGeneration :one
@@ -638,6 +769,74 @@ func (q *Queries) HideInboxMessage(ctx context.Context, arg HideInboxMessagePara
 	return err
 }
 
+const insertComment = `-- name: InsertComment :execrows
+INSERT INTO comment (
+      uuid, thread_uuid, author, author_name, created, updated,
+      mentioned, payload
+) VALUES (
+      $1, $2, $3, $4, $5, $5,
+      $6, $7
+)
+ON CONFLICT (uuid) DO NOTHING
+`
+
+type InsertCommentParams struct {
+	UUID       uuid.UUID
+	ThreadUuid uuid.UUID
+	Author     string
+	AuthorName string
+	Created    pgtype.Timestamptz
+	Mentioned  []string
+	Payload    []byte
+}
+
+func (q *Queries) InsertComment(ctx context.Context, arg InsertCommentParams) (int64, error) {
+	result, err := q.db.Exec(ctx, insertComment,
+		arg.UUID,
+		arg.ThreadUuid,
+		arg.Author,
+		arg.AuthorName,
+		arg.Created,
+		arg.Mentioned,
+		arg.Payload,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const insertCommentThread = `-- name: InsertCommentThread :execrows
+INSERT INTO comment_thread (
+      uuid, document_uuid, kind, created, created_by, updated
+) VALUES (
+      $1, $2, $3, $4, $5, $4
+)
+ON CONFLICT (uuid) DO NOTHING
+`
+
+type InsertCommentThreadParams struct {
+	UUID         uuid.UUID
+	DocumentUuid uuid.UUID
+	Kind         string
+	Created      pgtype.Timestamptz
+	CreatedBy    string
+}
+
+func (q *Queries) InsertCommentThread(ctx context.Context, arg InsertCommentThreadParams) (int64, error) {
+	result, err := q.db.Exec(ctx, insertCommentThread,
+		arg.UUID,
+		arg.DocumentUuid,
+		arg.Kind,
+		arg.Created,
+		arg.CreatedBy,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const insertConfigGeneration = `-- name: InsertConfigGeneration :one
 INSERT INTO config_generation (identity_hash, description)
 VALUES ($1, $2)
@@ -795,6 +994,142 @@ func (q *Queries) InsertMessage(ctx context.Context, arg InsertMessageParams) er
 		arg.Payload,
 	)
 	return err
+}
+
+const listCommentThreads = `-- name: ListCommentThreads :many
+SELECT t.uuid, t.document_uuid, t.kind, t.created, t.created_by, t.updated,
+       t.resolved, t.resolved_by,
+       (SELECT COUNT(*) FROM comment AS c
+        WHERE c.thread_uuid = t.uuid AND c.deleted IS NULL)::bigint AS live_comments
+FROM comment_thread AS t
+WHERE t.document_uuid = $1
+      AND ($2::bool OR t.resolved IS NULL)
+ORDER BY t.updated DESC, t.uuid DESC
+`
+
+type ListCommentThreadsParams struct {
+	DocumentUuid    uuid.UUID
+	IncludeResolved bool
+}
+
+type ListCommentThreadsRow struct {
+	UUID         uuid.UUID
+	DocumentUuid uuid.UUID
+	Kind         string
+	Created      pgtype.Timestamptz
+	CreatedBy    string
+	Updated      pgtype.Timestamptz
+	Resolved     pgtype.Timestamptz
+	ResolvedBy   pgtype.Text
+	LiveComments int64
+}
+
+func (q *Queries) ListCommentThreads(ctx context.Context, arg ListCommentThreadsParams) ([]ListCommentThreadsRow, error) {
+	rows, err := q.db.Query(ctx, listCommentThreads, arg.DocumentUuid, arg.IncludeResolved)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListCommentThreadsRow
+	for rows.Next() {
+		var i ListCommentThreadsRow
+		if err := rows.Scan(
+			&i.UUID,
+			&i.DocumentUuid,
+			&i.Kind,
+			&i.Created,
+			&i.CreatedBy,
+			&i.Updated,
+			&i.Resolved,
+			&i.ResolvedBy,
+			&i.LiveComments,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listComments = `-- name: ListComments :many
+SELECT uuid, thread_uuid, author, author_name, created, updated,
+       deleted, deleted_by, mentioned, payload
+FROM comment
+WHERE thread_uuid = $1
+ORDER BY created ASC, uuid ASC
+`
+
+func (q *Queries) ListComments(ctx context.Context, threadUuid uuid.UUID) ([]Comment, error) {
+	rows, err := q.db.Query(ctx, listComments, threadUuid)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Comment
+	for rows.Next() {
+		var i Comment
+		if err := rows.Scan(
+			&i.UUID,
+			&i.ThreadUuid,
+			&i.Author,
+			&i.AuthorName,
+			&i.Created,
+			&i.Updated,
+			&i.Deleted,
+			&i.DeletedBy,
+			&i.Mentioned,
+			&i.Payload,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listCommentsByThreads = `-- name: ListCommentsByThreads :many
+SELECT uuid, thread_uuid, author, author_name, created, updated,
+       deleted, deleted_by, mentioned, payload
+FROM comment
+WHERE thread_uuid = ANY($1::uuid[])
+ORDER BY thread_uuid, created ASC, uuid ASC
+`
+
+func (q *Queries) ListCommentsByThreads(ctx context.Context, threadUuids []uuid.UUID) ([]Comment, error) {
+	rows, err := q.db.Query(ctx, listCommentsByThreads, threadUuids)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Comment
+	for rows.Next() {
+		var i Comment
+		if err := rows.Scan(
+			&i.UUID,
+			&i.ThreadUuid,
+			&i.Author,
+			&i.AuthorName,
+			&i.Created,
+			&i.Updated,
+			&i.Deleted,
+			&i.DeletedBy,
+			&i.Mentioned,
+			&i.Payload,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const listConfigGenerations = `-- name: ListConfigGenerations :many
@@ -1071,6 +1406,61 @@ func (q *Queries) ListInboxMessagesBeforeId(ctx context.Context, arg ListInboxMe
 	return items, nil
 }
 
+const listMentions = `-- name: ListMentions :many
+SELECT c.uuid, c.thread_uuid, t.document_uuid, c.author, c.author_name,
+       c.created
+FROM comment AS c
+     INNER JOIN comment_thread AS t ON t.uuid = c.thread_uuid
+WHERE c.mentioned @> ARRAY[$1::text]
+      AND c.deleted IS NULL
+      AND ($2::timestamptz IS NULL
+           OR c.created < $2::timestamptz)
+ORDER BY c.created DESC, c.uuid DESC
+LIMIT $3::bigint
+`
+
+type ListMentionsParams struct {
+	Subject string
+	Before  pgtype.Timestamptz
+	Limit   int64
+}
+
+type ListMentionsRow struct {
+	UUID         uuid.UUID
+	ThreadUuid   uuid.UUID
+	DocumentUuid uuid.UUID
+	Author       string
+	AuthorName   string
+	Created      pgtype.Timestamptz
+}
+
+func (q *Queries) ListMentions(ctx context.Context, arg ListMentionsParams) ([]ListMentionsRow, error) {
+	rows, err := q.db.Query(ctx, listMentions, arg.Subject, arg.Before, arg.Limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListMentionsRow
+	for rows.Next() {
+		var i ListMentionsRow
+		if err := rows.Scan(
+			&i.UUID,
+			&i.ThreadUuid,
+			&i.DocumentUuid,
+			&i.Author,
+			&i.AuthorName,
+			&i.Created,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listMessagesAfterId = `-- name: ListMessagesAfterId :many
 SELECT recipient, id, type, created, created_by, doc_uuid, doc_type, payload
 FROM message
@@ -1153,6 +1543,24 @@ func (q *Queries) Notify(ctx context.Context, arg NotifyParams) error {
 	return err
 }
 
+const reopenCommentThread = `-- name: ReopenCommentThread :exec
+UPDATE comment_thread
+SET resolved = NULL,
+    resolved_by = NULL,
+    updated = $1
+WHERE uuid = $2
+`
+
+type ReopenCommentThreadParams struct {
+	Updated pgtype.Timestamptz
+	UUID    uuid.UUID
+}
+
+func (q *Queries) ReopenCommentThread(ctx context.Context, arg ReopenCommentThreadParams) error {
+	_, err := q.db.Exec(ctx, reopenCommentThread, arg.Updated, arg.UUID)
+	return err
+}
+
 const reserveSequenceValues = `-- name: ReserveSequenceValues :one
 UPDATE sequence_counter
 SET value = value + $1::bigint
@@ -1170,6 +1578,25 @@ func (q *Queries) ReserveSequenceValues(ctx context.Context, arg ReserveSequence
 	var value int64
 	err := row.Scan(&value)
 	return value, err
+}
+
+const resolveCommentThread = `-- name: ResolveCommentThread :exec
+UPDATE comment_thread
+SET resolved = $1,
+    resolved_by = $2,
+    updated = $1
+WHERE uuid = $3
+`
+
+type ResolveCommentThreadParams struct {
+	Resolved   pgtype.Timestamptz
+	ResolvedBy pgtype.Text
+	UUID       uuid.UUID
+}
+
+func (q *Queries) ResolveCommentThread(ctx context.Context, arg ResolveCommentThreadParams) error {
+	_, err := q.db.Exec(ctx, resolveCommentThread, arg.Resolved, arg.ResolvedBy, arg.UUID)
+	return err
 }
 
 const setInboxMessageRead = `-- name: SetInboxMessageRead :exec
@@ -1193,6 +1620,47 @@ func (q *Queries) SetInboxMessageRead(ctx context.Context, arg SetInboxMessageRe
 		arg.Subject,
 		arg.IsRead,
 		arg.Updated,
+	)
+	return err
+}
+
+const touchCommentThread = `-- name: TouchCommentThread :exec
+UPDATE comment_thread
+SET updated = $1
+WHERE uuid = $2
+`
+
+type TouchCommentThreadParams struct {
+	Updated pgtype.Timestamptz
+	UUID    uuid.UUID
+}
+
+func (q *Queries) TouchCommentThread(ctx context.Context, arg TouchCommentThreadParams) error {
+	_, err := q.db.Exec(ctx, touchCommentThread, arg.Updated, arg.UUID)
+	return err
+}
+
+const updateComment = `-- name: UpdateComment :exec
+UPDATE comment
+SET payload = $1,
+    mentioned = $2,
+    updated = $3
+WHERE uuid = $4
+`
+
+type UpdateCommentParams struct {
+	Payload   []byte
+	Mentioned []string
+	Updated   pgtype.Timestamptz
+	UUID      uuid.UUID
+}
+
+func (q *Queries) UpdateComment(ctx context.Context, arg UpdateCommentParams) error {
+	_, err := q.db.Exec(ctx, updateComment,
+		arg.Payload,
+		arg.Mentioned,
+		arg.Updated,
+		arg.UUID,
 	)
 	return err
 }

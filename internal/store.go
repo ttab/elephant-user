@@ -24,6 +24,7 @@ const (
 	NotifyChannelEventLogUpdate     NotifyChannel = "event_log_update"
 	NotifyChannelSchemaUpdate       NotifyChannel = "schema_update"
 	NotifyChannelDeprecationUpdate  NotifyChannel = "deprecation_update"
+	NotifyChannelCommentUpdate      NotifyChannel = "comment_update"
 )
 
 type PGStore struct {
@@ -37,6 +38,7 @@ type PGStore struct {
 	EventLog      *pg.FanOut[EventLogEvent]
 	Schemas       *pg.FanOut[SchemaEvent]
 	Deprecations  *pg.FanOut[DeprecationEvent]
+	Comments      *pg.FanOut[CommentEvent]
 }
 
 func NewPGStore(
@@ -53,6 +55,7 @@ func NewPGStore(
 		EventLog:      pg.NewFanOut[EventLogEvent](NotifyChannelEventLogUpdate),
 		Schemas:       pg.NewFanOut[SchemaEvent](NotifyChannelSchemaUpdate),
 		Deprecations:  pg.NewFanOut[DeprecationEvent](NotifyChannelDeprecationUpdate),
+		Comments:      pg.NewFanOut[CommentEvent](NotifyChannelCommentUpdate),
 	}
 }
 
@@ -70,6 +73,7 @@ func (s *PGStore) NewSubscriber(
 		s.EventLog,
 		s.Schemas,
 		s.Deprecations,
+		s.Comments,
 	}, opts...)
 }
 

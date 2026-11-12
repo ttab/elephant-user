@@ -17,6 +17,12 @@
         "version": "v1.0.0",
         "spec": "{\"name\": \"se.ecms.user.messages\", \"version\": 1, \"documents\": [{\"name\": \"Inbox message\", \"content\": [{\"data\": {\"text\": {\"format\": \"html\", \"allowEmpty\": true}}, \"declares\": {\"type\": \"core/text\"}, \"attributes\": {\"role\": {\"enum\": [\"heading-1\", \"heading-2\"], \"optional\": true}}, \"description\": \"Text block\"}], \"declares\": \"core/inbox-message\", \"attributes\": {\"uri\": {\"glob\": [\"message://inbox/**\"]}, \"title\": {}}, \"description\": \"A document that describes an inbox message intended for a recipient.\"}], \"htmlPolicies\": [{\"name\": \"default\", \"elements\": {\"a\": {\"attributes\": {\"id\": {\"optional\": true}, \"href\": {\"optional\": true}}}, \"em\": {\"attributes\": {\"id\": {\"optional\": true}}}, \"strong\": {\"attributes\": {\"id\": {\"optional\": true}}}}}]}",
         "usage": "SCHEMA_USAGE_MESSAGES"
+      },
+      {
+        "name": "se.ecms.user.comments",
+        "version": "v1.0.0",
+        "spec": "{\"name\": \"se.ecms.user.comments\", \"version\": 1, \"documents\": [{\"name\": \"Comment\", \"content\": [{\"data\": {\"text\": {\"format\": \"html\", \"allowEmpty\": true, \"htmlPolicy\": \"comment\"}}, \"links\": [{\"declares\": {\"rel\": \"mention\"}, \"attributes\": {\"id\": {}, \"uri\": {\"glob\": [\"core://user/**\", \"core://application/**\", \"keycloak://user/**\"]}, \"type\": {}}, \"description\": \"A mention of a subject, bound by id to a <mention> element in the text\"}, {\"data\": {\"thread\": {\"optional\": true}, \"comment\": {\"optional\": true}}, \"declares\": {\"rel\": \"see-also\"}, \"attributes\": {\"id\": {}, \"type\": {}, \"uuid\": {}}, \"description\": \"A reference to a document, or to a thread or comment on it, bound by id to an <a> element in the text\"}], \"declares\": {\"type\": \"core/text\"}, \"description\": \"Text block\"}], \"declares\": \"core/comment\", \"attributes\": {\"title\": {\"optional\": true, \"allowEmpty\": true}}, \"description\": \"The body of a comment in a thread on a document.\"}], \"htmlPolicies\": [{\"name\": \"default\", \"elements\": {\"em\": {}, \"strong\": {}}}, {\"name\": \"comment\", \"uses\": \"default\", \"elements\": {\"a\": {\"attributes\": {\"id\": {}, \"href\": {\"optional\": true}}}, \"mention\": {\"attributes\": {\"id\": {}}}}}]}",
+        "usage": "SCHEMA_USAGE_COMMENTS"
       }
     ]
   }

@@ -18,6 +18,11 @@
           "usage": "SCHEMA_USAGE_MESSAGES"
         },
         {
+          "name": "se.ecms.user.comments",
+          "version": "v1.0.0",
+          "usage": "SCHEMA_USAGE_COMMENTS"
+        },
+        {
           "name": "test-settings-extra",
           "version": "v1.0.0",
           "usage": "SCHEMA_USAGE_SETTINGS"
@@ -39,6 +44,11 @@
           "name": "se.ecms.user.messages",
           "version": "v1.0.0",
           "usage": "SCHEMA_USAGE_MESSAGES"
+        },
+        {
+          "name": "se.ecms.user.comments",
+          "version": "v1.0.0",
+          "usage": "SCHEMA_USAGE_COMMENTS"
         }
       ]
     }
