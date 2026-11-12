@@ -53,7 +53,7 @@ Changes:
 - New metric `elephant_user_permission_lookups_total{outcome}` and the
   `client_*` series for the `repository` client; see
   [Repository permissions](docs/observability.md#repository-permissions).
-- Dependency upgrades: elephant-api to the pre-release carrying the
+- Dependency upgrades: elephant-api to v0.29.0, the release carrying the
   `Comments` service and `SCHEMA_USAGE_COMMENTS`.
 - Documentation: the comments vocabulary in `CONTEXT.md`, and
   [ADR-0002](docs/adr/0002-comment-access-follows-the-repository-document.md)
