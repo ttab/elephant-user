@@ -4,7 +4,7 @@ All notable changes to elephant-user from v1.0.0 onwards are documented here.
 Entries are derived from the release tags; the linked pull requests hold the
 detail. Earlier history is not reconstructed.
 
-## [v1.9.0] - Unreleased
+## [v1.9.0] - 2026-11-12
 
 **New API (comments):** a fourth service, `Comments`, holds threads of
 comments on repository documents: `CreateComment`, `UpdateComment`,
@@ -43,21 +43,21 @@ Changes:
   idempotent creates, mentions derived from the payload's `rel: mention`
   links, deleted comments kept in their thread without their payload, and a
   post to a resolved thread reopening it. Inline `<mention id>` and `<a id>`
-  elements must be bound to a link with the same id in their block.
+  elements must be bound to a link with the same id in their block. (#100)
 - New schema usage `comments` (`SCHEMA_USAGE_COMMENTS`), accepted by
   `RegisterConfigGeneration`, and a new embedded schema
-  `se.ecms.user.comments@v1.0.0` declaring the `core/comment` body.
+  `se.ecms.user.comments@v1.0.0` declaring the `core/comment` body. (#100)
 - New optional `--repository-endpoint` flag (`REPOSITORY_ENDPOINT`). Document
   permissions are cached for 30 s per caller and document, so an ACL change
-  reaches comments within that window.
+  reaches comments within that window. (#100)
 - New metric `elephant_user_permission_lookups_total{outcome}` and the
   `client_*` series for the `repository` client; see
-  [Repository permissions](docs/observability.md#repository-permissions).
+  [Repository permissions](docs/observability.md#repository-permissions). (#100)
 - Dependency upgrades: elephant-api to v0.29.0, the release carrying the
-  `Comments` service and `SCHEMA_USAGE_COMMENTS`.
+  `Comments` service and `SCHEMA_USAGE_COMMENTS`. (#100)
 - Documentation: the comments vocabulary in `CONTEXT.md`, and
   [ADR-0002](docs/adr/0002-comment-access-follows-the-repository-document.md)
-  on why comment access follows the repository document.
+  on why comment access follows the repository document. (#100)
 
 ## [v1.8.0] - 2026-10-14
 
