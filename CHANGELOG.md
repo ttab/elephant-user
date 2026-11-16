@@ -17,6 +17,8 @@ Changes:
 
 - Comment thread kinds are checked as reverse domain notation; the glossary
   and the [RPC error codes](docs/architecture.md#rpc-apis) give the rule.
+- Dependency upgrades: elephant-api to v0.29.4, which documents the kind
+  rule on the proto.
 
 ## [v1.9.0] - 2026-11-12
 
