@@ -526,8 +526,14 @@ is `internal`. The other error codes:
 - `invalid_argument`: a missing or malformed uuid; a payload that fails
   validation or has an inline id without a matching link; a new thread
   without `document_uuid`; a `document_uuid` other than an existing thread's;
-  more than 100 documents in a wait; a negative `max_wait_sec` or `size`; a
-  malformed `before`.
+  a non-empty `kind` on `CreateComment` that is not reverse domain notation,
+  on an existing thread too (rule below); more than 100 documents in a wait; a negative `max_wait_sec` or `size`; a malformed `before`.
+
+A thread's `kind` must match
+`^[a-z][a-z0-9-]*(\.[a-z][a-z0-9-]*){2,}$`, the elephant client's plugin id
+rule, as in `se.ecms.user.comments.factcheck`. The handler checks it with `checkReverseDomainNotation` before it reads the
+thread; the shape only, never a prefix, so a client may own kinds under its
+own.
 - `not_found`: an unknown thread or comment.
 - `permission_denied`: an edit of another author's comment, or a delete of
   one without `doc_admin`.

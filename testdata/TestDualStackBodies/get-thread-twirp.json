@@ -33,7 +33,7 @@
       ],
       "created_by": "core://user/tester",
       "document_uuid": "a0000000-0000-4000-8000-000000000001",
-      "kind": "factcheck",
+      "kind": "se.ecms.user.comments.factcheck",
       "live_comments": "1",
       "uuid": "b0000000-0000-4000-8000-000000000001"
     }

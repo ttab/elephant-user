@@ -254,6 +254,15 @@ func (s *CommentsService) CreateComment(
 		}
 	}
 
+	// Checked on an existing thread too, where the kind is otherwise
+	// ignored, so that a caller sending a bad kind is always told.
+	if req.Kind != "" {
+		err = checkReverseDomainNotation(req.Kind)
+		if err != nil {
+			return nil, rpc.InvalidArgument("kind", err.Error())
+		}
+	}
+
 	// An existing thread decides the document; a new one takes it from
 	// the request.
 	documentUUID := requestedDoc

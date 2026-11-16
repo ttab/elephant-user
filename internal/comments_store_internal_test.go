@@ -63,7 +63,7 @@ func TestFitNotifyPayload(t *testing.T) {
 		ThreadUUID:   threadUUID,
 		CommentUUID:  &threadUUID,
 		Actor:        "core://user/actor",
-		Kind:         "factcheck",
+		Kind:         "se.ecms.user.comments.factcheck",
 	}
 
 	for i := range 500 {
