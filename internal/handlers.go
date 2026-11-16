@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"regexp"
 	"strconv"
 
 	"connectrpc.com/connect"
@@ -14,6 +15,27 @@ import (
 	"github.com/ttab/newsdoc"
 	"github.com/ttab/revisor"
 )
+
+// reverseDomainPattern is the elephant client's plugin id rule: lowercase
+// ASCII labels that start with a letter and may contain digits and hyphens,
+// at least three of them joined by single dots.
+var reverseDomainPattern = regexp.MustCompile(
+	`^[a-z][a-z0-9-]*(\.[a-z][a-z0-9-]*){2,}$`)
+
+// checkReverseDomainNotation checks that a name is in reverse domain
+// notation, such as "se.ecms.user.comments.factcheck". It checks the shape
+// only, never a prefix or a length. The error reads as the continuation of
+// the argument's name.
+func checkReverseDomainNotation(name string) error {
+	if !reverseDomainPattern.MatchString(name) {
+		return fmt.Errorf(
+			"%q is not in reverse domain notation: lowercase labels "+
+				"that start with a letter, at least three joined by dots",
+			name)
+	}
+
+	return nil
+}
 
 // waitEndedError maps the end of a long-poll wait to the RPC code the
 // caller expects: deadline_exceeded when the deadline they set ran out,

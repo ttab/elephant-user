@@ -213,7 +213,7 @@ func TestDualStackBodies(t *testing.T) {
 	commentBody := `{"uuid":"c0000000-0000-4000-8000-000000000001",` +
 		`"thread_uuid":"b0000000-0000-4000-8000-000000000001",` +
 		`"document_uuid":"a0000000-0000-4000-8000-000000000001",` +
-		`"kind":"factcheck","payload":{"uuid":` +
+		`"kind":"se.ecms.user.comments.factcheck","payload":{"uuid":` +
 		`"6f1d1d8e-2b1a-4c55-9d7e-3a2f4b5c6d7e","type":"core/comment",` +
 		`"content":[{"type":"core/text","data":{"text":` +
 		`"Ask <mention id=\"m1\">Anna</mention>."},"links":[{"id":"m1",` +
@@ -379,6 +379,26 @@ func TestDualStackErrorParity(t *testing.T) {
 
 		test.Equalf(t, "payload", rpc.Meta(connectErr)["argument"],
 			"name the missing argument in the metadata")
+	})
+
+	t.Run("comment kind", func(t *testing.T) {
+		req := &user.CreateCommentRequest{
+			Uuid:         "c0000000-0000-4000-8000-000000000091",
+			ThreadUuid:   "b0000000-0000-4000-8000-000000000091",
+			DocumentUuid: "a0000000-0000-4000-8000-000000000091",
+			Kind:         "factcheck",
+			Payload:      &newsdoc.Document{Type: "core/comment"},
+		}
+
+		_, twirpErr := twirpClients.Comments.CreateComment(userCtx, req)
+		_, connectErr := connectClients.Comments.CreateComment(userCtx, req)
+
+		check(t, connect.CodeInvalidArgument, twirpErr, connectErr)
+
+		test.Equalf(t, "kind", rpc.Meta(twirpErr)["argument"],
+			"name the kind argument over Twirp")
+		test.Equalf(t, "kind", rpc.Meta(connectErr)["argument"],
+			"name the kind argument over Connect")
 	})
 
 	t.Run("validation errors", func(t *testing.T) {

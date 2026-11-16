@@ -4,6 +4,22 @@ All notable changes to elephant-user from v1.0.0 onwards are documented here.
 Entries are derived from the release tags; the linked pull requests hold the
 detail. Earlier history is not reconstructed.
 
+## [v1.10.0] - Unreleased
+
+**Behaviour change (comment kinds):** `CreateComment` accepted any string as
+`kind`. A non-empty `kind` must now be reverse domain notation, matching
+`^[a-z][a-z0-9-]*(\.[a-z][a-z0-9-]*){2,}$`, such as
+`se.ecms.user.comments.factcheck`; anything else, `factcheck` included, is
+refused with `invalid_argument` and argument `kind`, also on an existing
+thread where the kind is otherwise ignored. An empty `kind` is still allowed.
+
+Changes:
+
+- Comment thread kinds are checked as reverse domain notation; the glossary
+  and the [RPC error codes](docs/architecture.md#rpc-apis) give the rule.
+- Dependency upgrades: elephant-api to v0.29.4, which documents the kind
+  rule on the proto.
+
 ## [v1.9.0] - 2026-11-12
 
 **New API (comments):** a fourth service, `Comments`, holds threads of

@@ -253,7 +253,7 @@ func TestCommentsService(t *testing.T) {
 			Uuid:         id,
 			ThreadUuid:   thread,
 			DocumentUuid: document,
-			Kind:         "factcheck",
+			Kind:         "se.ecms.user.comments.factcheck",
 			Payload:      payload,
 		})
 	}
@@ -285,7 +285,7 @@ func TestCommentsService(t *testing.T) {
 
 		test.Equalf(t, threadA1, res.Thread.Uuid, "thread uuid")
 		test.Equalf(t, docA, res.Thread.DocumentUuid, "thread document")
-		test.Equalf(t, "factcheck", res.Thread.Kind, "thread kind")
+		test.Equalf(t, "se.ecms.user.comments.factcheck", res.Thread.Kind, "thread kind")
 		test.Equalf(t, alice, res.Thread.CreatedBy, "thread creator")
 		test.Equalf(t, int64(1), res.Thread.LiveComments, "live comments")
 		test.Equalf(t, 0, len(res.Thread.Comments),
@@ -351,6 +351,40 @@ func TestCommentsService(t *testing.T) {
 
 		_, err = eu.Comments.GetThread(bobCtx, &user.GetThreadRequest{Uuid: "nope"})
 		test.IsRPCError(t, err, connect.CodeInvalidArgument)
+	})
+
+	t.Run("kind not in reverse domain notation", func(t *testing.T) {
+		createWithKind := func(
+			thread, document, kind string,
+		) (*user.CreateCommentResponse, error) {
+			return eu.Comments.CreateComment(bobCtx, &user.CreateCommentRequest{
+				Uuid:         comment3,
+				ThreadUuid:   thread,
+				DocumentUuid: document,
+				Kind:         kind,
+				Payload:      rpcCommentPayload("Bad kind."),
+			})
+		}
+
+		for _, kind := range []string{
+			"factcheck",
+			"comments.factcheck",
+			"se.ecms.user.comments.FactCheck",
+		} {
+			_, err := createWithKind(threadB1, docA, kind)
+			test.IsRPCError(t, err, connect.CodeInvalidArgument)
+
+			test.Equalf(t, "kind", rpc.Meta(err)["argument"],
+				"name the kind argument for %q", kind)
+		}
+
+		// The kind is ignored on an existing thread, but a bad one is
+		// still refused.
+		_, err := createWithKind(threadA1, "", "factcheck")
+		test.IsRPCError(t, err, connect.CodeInvalidArgument)
+
+		_, err = eu.Comments.GetThread(bobCtx, &user.GetThreadRequest{Uuid: threadB1})
+		test.IsRPCError(t, err, connect.CodeNotFound)
 	})
 
 	t.Run("invalid payload", func(t *testing.T) {

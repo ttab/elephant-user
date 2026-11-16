@@ -130,9 +130,11 @@ anchor without a thread is one not saved yet.
 _Avoid_: Marker, highlight
 
 **Kind**:
-An open string a thread is created with, such as `factcheck`, possibly empty.
-A label for clients, fixed for the thread's life; not a schema usage and not
-a permission.
+A name in reverse domain notation a thread is created with, such as
+`se.ecms.user.comments.factcheck`, possibly empty: lowercase labels that start
+with a letter, at least three joined by dots. The service checks the shape,
+never the prefix. A label for clients, fixed for the
+thread's life; not a schema usage and not a permission.
 _Avoid_: Type, category
 
 **Mention**:

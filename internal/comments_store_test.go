@@ -113,12 +113,12 @@ func TestCommentsCreate(t *testing.T) {
 			"core://user/b", "core://user/a", "core://user/b"),
 	}
 
-	comment, thread, err := eu.Store.CreateComment(ctx, first, docUUID, "factcheck")
+	comment, thread, err := eu.Store.CreateComment(ctx, first, docUUID, "se.ecms.user.comments.factcheck")
 	test.Mustf(t, err, "create the first comment")
 
 	test.Equalf(t, threadUUID, thread.UUID, "thread uuid")
 	test.Equalf(t, docUUID, thread.DocumentUUID, "thread document")
-	test.Equalf(t, "factcheck", thread.Kind, "thread kind")
+	test.Equalf(t, "se.ecms.user.comments.factcheck", thread.Kind, "thread kind")
 	test.Equalf(t, commentAuthor, thread.CreatedBy, "thread created by")
 	test.Equalf(t, int64(1), thread.LiveComments, "live comments")
 	test.Equalf(t, "Author", comment.AuthorName, "author name")
@@ -134,7 +134,7 @@ func TestCommentsCreate(t *testing.T) {
 
 	test.Equalf(t, threadUUID, got[0].ThreadUUID, "thread event thread")
 	test.Equalf(t, docUUID, got[0].DocumentUUID, "thread event document")
-	test.Equalf(t, "factcheck", got[0].Kind, "thread event kind")
+	test.Equalf(t, "se.ecms.user.comments.factcheck", got[0].Kind, "thread event kind")
 	test.Equalf(t, commentAuthor, got[0].Actor, "thread event actor")
 
 	if got[0].CommentUUID != nil {
@@ -160,7 +160,7 @@ func TestCommentsCreate(t *testing.T) {
 	repeat := first
 	repeat.Payload = indented
 
-	again, againThread, err := eu.Store.CreateComment(ctx, repeat, docUUID, "factcheck")
+	again, againThread, err := eu.Store.CreateComment(ctx, repeat, docUUID, "se.ecms.user.comments.factcheck")
 	test.Mustf(t, err, "repeat the first comment")
 
 	test.Equalf(t, comment.UUID, again.UUID, "repeat answers the same comment")

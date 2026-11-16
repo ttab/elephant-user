@@ -522,7 +522,7 @@ func TestConcurrentCommentThreadCreate(t *testing.T) {
 					ThreadUUID: threadUUID,
 					Author:     fmt.Sprintf("core://user/writer-%d", i),
 					Payload:    payload,
-				}, docUUID, "factcheck")
+				}, docUUID, "se.ecms.user.comments.factcheck")
 				if err != nil {
 					t.Errorf("round %d writer %d: %v", round, i, err)
 
