@@ -1751,19 +1751,28 @@ SELECT key, id, kind, document_uuid, document_type, refs, actor,
        event_uuid, created, meta
 FROM notification
 WHERE key = ANY($1::text[])
-      AND created < $2
+      AND created <= $2
+      AND (created, key, id) < ($2, $3::text, $4::bigint)
 ORDER BY created DESC, key DESC, id DESC
-LIMIT $3::bigint
+LIMIT $5::bigint
 `
 
 type ListNotificationsBeforeParams struct {
-	Keys   []string
-	Before pgtype.Timestamptz
-	Limit  int64
+	Keys      []string
+	Before    pgtype.Timestamptz
+	BeforeKey string
+	BeforeID  int64
+	Limit     int64
 }
 
 func (q *Queries) ListNotificationsBefore(ctx context.Context, arg ListNotificationsBeforeParams) ([]Notification, error) {
-	rows, err := q.db.Query(ctx, listNotificationsBefore, arg.Keys, arg.Before, arg.Limit)
+	rows, err := q.db.Query(ctx, listNotificationsBefore,
+		arg.Keys,
+		arg.Before,
+		arg.BeforeKey,
+		arg.BeforeID,
+		arg.Limit,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -1786,6 +1795,38 @@ func (q *Queries) ListNotificationsBefore(ctx context.Context, arg ListNotificat
 			return nil, err
 		}
 		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listNotifiedKeys = `-- name: ListNotifiedKeys :many
+SELECT key
+FROM notification
+WHERE key = ANY($1::text[])
+      AND event_uuid = $2
+`
+
+type ListNotifiedKeysParams struct {
+	Keys      []string
+	EventUuid uuid.UUID
+}
+
+func (q *Queries) ListNotifiedKeys(ctx context.Context, arg ListNotifiedKeysParams) ([]string, error) {
+	rows, err := q.db.Query(ctx, listNotifiedKeys, arg.Keys, arg.EventUuid)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []string
+	for rows.Next() {
+		var key string
+		if err := rows.Scan(&key); err != nil {
+			return nil, err
+		}
+		items = append(items, key)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err

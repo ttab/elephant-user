@@ -22,6 +22,10 @@ func TestMetricsLint(t *testing.T) {
 	m.Deprecations.WithLabelValues("example").Inc()
 	m.DocsWithDeprecations.WithLabelValues("core/example").Inc()
 	m.PermissionLookups.WithLabelValues(internal.PermissionLookupHit).Inc()
+	m.NotificationsWritten.WithLabelValues(
+		string(internal.NotificationFamilyIngest)).Inc()
+	m.CleanerDeletions.WithLabelValues(
+		internal.CleanerDeletedNotification).Inc()
 
 	problems, err := testutil.GatherAndLint(reg)
 	test.Mustf(t, err, "gather and lint metrics")

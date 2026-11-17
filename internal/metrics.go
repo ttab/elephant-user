@@ -12,6 +12,20 @@ const (
 	LabelDeprecation = "label"
 	LabelDocType     = "doc_type"
 	LabelOutcome     = "outcome"
+	LabelFamily      = "family"
+	LabelItem        = "item"
+)
+
+// NotificationFamilyOther labels feed rows from a family the metrics do not
+// know, so that a caller-supplied value never becomes a label.
+const NotificationFamilyOther = "other"
+
+// What the cleaner deleted.
+const (
+	// CleanerDeletedSubscription is an expired notification subscription.
+	CleanerDeletedSubscription = "subscription"
+	// CleanerDeletedNotification is a feed row past the retention.
+	CleanerDeletedNotification = "notification"
 )
 
 // Outcomes of a document permission lookup.
@@ -41,6 +55,11 @@ type Metrics struct {
 	// PermissionLookups counts document permission lookups against the
 	// repository by outcome.
 	PermissionLookups *prometheus.CounterVec
+	// NotificationsWritten counts feed rows written by the family of the
+	// event.
+	NotificationsWritten *prometheus.CounterVec
+	// CleanerDeletions counts rows the cleaner deleted by item.
+	CleanerDeletions *prometheus.CounterVec
 }
 
 // NewMetrics registers the service metrics with reg and fails if any
@@ -73,6 +92,22 @@ func NewMetrics(reg prometheus.Registerer) (*Metrics, error) {
 			"repository refused, not_found, or error. A rising error " +
 			"rate means document access checks are failing.",
 	}, []string{LabelOutcome})
+
+	h.CounterVec(&m.NotificationsWritten, prometheus.CounterOpts{
+		Name: "elephant_user_notifications_written_total",
+		Help: "Notification feed rows written, one per event and key, by " +
+			"the family the event came from. A family that stops " +
+			"counting has stopped producing notifications; a jump in " +
+			"ingest is a producer or a subscription fan-out growing.",
+	}, []string{LabelFamily})
+
+	h.CounterVec(&m.CleanerDeletions, prometheus.CounterOpts{
+		Name: "elephant_user_cleaner_deletions_total",
+		Help: "Rows the retention cleaner deleted, by item: subscription " +
+			"for expired notification subscriptions, notification for " +
+			"feed rows past the retention. Flat while the feed is in use " +
+			"means the cleaner is not running.",
+	}, []string{LabelItem})
 
 	err := h.Err()
 	if err != nil {

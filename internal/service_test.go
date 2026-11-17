@@ -403,6 +403,7 @@ type TestElephantUser struct {
 	Store     *internal.PGStore
 	Validator *internal.Validator
 	Registry  *prometheus.Registry
+	Metrics   *internal.Metrics
 	// DB is the test database, for tests that hold locks or inspect
 	// rows behind the store's back.
 	DB *pgxpool.Pool
@@ -521,7 +522,12 @@ func startElephantUser(t *testing.T) TestElephantUser {
 		go dbpool.Close()
 	})
 
-	store := internal.NewPGStore(logger, dbpool)
+	reg := prometheus.NewRegistry()
+
+	metrics, err := internal.NewMetrics(reg)
+	test.Mustf(t, err, "create metrics")
+
+	store := internal.NewPGStore(logger, dbpool, metrics)
 
 	subscriber := store.NewSubscriber(dbpool)
 
@@ -538,11 +544,6 @@ func startElephantUser(t *testing.T) TestElephantUser {
 	_, err = store.RegisterConfigGeneration(ctx,
 		"embedded schemas", internal.EmbeddedConfigSchemas(), true)
 	test.Mustf(t, err, "register embedded schemas")
-
-	reg := prometheus.NewRegistry()
-
-	metrics, err := internal.NewMetrics(reg)
-	test.Mustf(t, err, "create metrics")
 
 	validator, err := internal.NewValidator(ctx, logger, store, metrics)
 	test.Mustf(t, err, "create validator")
@@ -603,6 +604,7 @@ func startElephantUser(t *testing.T) TestElephantUser {
 		Store:         store,
 		Validator:     validator,
 		Registry:      reg,
+		Metrics:       metrics,
 		DB:            dbpool,
 	}
 }

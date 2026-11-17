@@ -100,10 +100,25 @@ to the bouncer pool.`,
 			},
 			&cli.DurationFlag{
 				Name: "cleanup-interval",
-				Usage: `How often expired messages and inbox messages are
-removed. Runs on one replica at a time under a job lock.`,
+				Usage: `How often expired messages, inbox messages,
+notification subscriptions and notifications are removed. Runs on one replica at
+a time under a job lock.`,
 				Sources: cli.EnvVars("CLEANUP_INTERVAL"),
 				Value:   12 * time.Hour,
+			},
+			&cli.DurationFlag{
+				Name: "subscription-ttl",
+				Usage: `How long a notification subscription lives when the
+subscriber gives no lifetime of its own.`,
+				Sources: cli.EnvVars("SUBSCRIPTION_TTL"),
+				Value:   internal.DefaultSubscriptionTTL,
+			},
+			&cli.DurationFlag{
+				Name: "notification-retention",
+				Usage: `How old a notification gets before the cleaner removes
+it.`,
+				Sources: cli.EnvVars("NOTIFICATION_RETENTION"),
+				Value:   internal.DefaultNotificationRetention,
 			},
 			&cli.StringFlag{
 				Name:    "repository-endpoint",
@@ -146,10 +161,20 @@ func runUser(ctx context.Context, cmd *cli.Command) error {
 		cleanupInterval   = cmd.Duration("cleanup-interval")
 		dbMaxConns        = cmd.Int("db-max-conns")
 		repoEndpoint      = cmd.String("repository-endpoint")
+		subscriptionTTL   = cmd.Duration("subscription-ttl")
+		retention         = cmd.Duration("notification-retention")
 	)
 
 	if cleanupInterval <= 0 {
 		return fmt.Errorf("cleanup-interval must be positive, got %s", cleanupInterval)
+	}
+
+	if subscriptionTTL <= 0 {
+		return fmt.Errorf("subscription-ttl must be positive, got %s", subscriptionTTL)
+	}
+
+	if retention <= 0 {
+		return fmt.Errorf("notification-retention must be positive, got %s", retention)
 	}
 
 	logger := elephantine.SetUpLogger(logLevel, os.Stdout)
@@ -207,7 +232,9 @@ func runUser(ctx context.Context, cmd *cli.Command) error {
 		return err
 	}
 
-	store := internal.NewPGStore(logger, dbpool)
+	store := internal.NewPGStore(logger, dbpool, metrics,
+		internal.WithSubscriptionTTL(subscriptionTTL),
+		internal.WithNotificationRetention(retention))
 
 	validator, err := internal.NewValidator(ctx, logger, store, metrics)
 	if err != nil {

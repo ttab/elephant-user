@@ -93,6 +93,25 @@ Document permission lookups against elephant-repository, made only when
   is the only instrumented client, so they are its connection setup; a TLS
   series exists only for an `https` endpoint.
 
+## Notification feed
+
+The feed store's writes and the cleaner's share of it. No handler calls the
+fan-out yet, so both stay at zero until one does.
+
+- `elephant_user_notifications_written_total{family}`: one per feed row
+  written, which is one per event and key, by the family the event came from:
+  `ingest`, `comments`, `settings`, `inbox`, `messages`, or `other` for a
+  value the metric does not know. A repeated event writes nothing and is not
+  counted. A family that stops counting has stopped producing notifications;
+  a jump in `ingest` is a producer sending more, or a document with more
+  subscribers.
+- `elephant_user_cleaner_deletions_total{item}`: rows the retention cleaner
+  deleted, `item="subscription"` for expired subscriptions and
+  `item="notification"` for feed rows past `NOTIFICATION_RETENTION`. It moves
+  once per sweep on the replica holding the `cleaner` lock. Flat for longer
+  than the cleanup interval while rows are written means the cleaner is not
+  running; read it with `pg_job_lock_held{name="cleaner"}`.
+
 ## Database
 
 From the `pg.PoolStatCollector` that elephantine's `pg.NewPools` registers for

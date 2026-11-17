@@ -478,9 +478,16 @@ SELECT key, id, kind, document_uuid, document_type, refs, actor,
        event_uuid, created, meta
 FROM notification
 WHERE key = ANY(@keys::text[])
-      AND created < @before
+      AND created <= @before
+      AND (created, key, id) < (@before, @before_key::text, @before_id::bigint)
 ORDER BY created DESC, key DESC, id DESC
 LIMIT sqlc.arg('limit')::bigint;
+
+-- name: ListNotifiedKeys :many
+SELECT key
+FROM notification
+WHERE key = ANY(@keys::text[])
+      AND event_uuid = @event_uuid;
 
 -- name: ListDocumentSubscriptions :many
 SELECT subject, document_uuid, expires_at
