@@ -303,6 +303,36 @@ type MessageWriteLock struct {
 	CurrentMessageID int64
 }
 
+type Notification struct {
+	Key          string
+	ID           int64
+	Kind         string
+	DocumentUuid uuid.UUID
+	DocumentType string
+	Refs         []byte
+	Actor        string
+	EventUuid    uuid.UUID
+	Created      pgtype.Timestamptz
+	Meta         []byte
+}
+
+type NotificationCursor struct {
+	Subject  string
+	Key      string
+	Position int64
+}
+
+type NotificationSequence struct {
+	Key    string
+	LastID int64
+}
+
+type NotificationSubscription struct {
+	Subject      string
+	DocumentUuid uuid.UUID
+	ExpiresAt    pgtype.Timestamptz
+}
+
 type Property struct {
 	Owner       string
 	Application string

@@ -22,6 +22,27 @@ func (q *Queries) ActivateConfigGeneration(ctx context.Context, id int64) error 
 	return err
 }
 
+const bumpNotificationCursor = `-- name: BumpNotificationCursor :exec
+INSERT INTO notification_cursor (
+      subject, key, position
+) VALUES (
+      $1, $2, $3
+)
+ON CONFLICT (subject, key) DO UPDATE
+SET position = GREATEST(notification_cursor.position, EXCLUDED.position)
+`
+
+type BumpNotificationCursorParams struct {
+	Subject  string
+	Key      string
+	Position int64
+}
+
+func (q *Queries) BumpNotificationCursor(ctx context.Context, arg BumpNotificationCursorParams) error {
+	_, err := q.db.Exec(ctx, bumpNotificationCursor, arg.Subject, arg.Key, arg.Position)
+	return err
+}
+
 const deactivateActiveConfigGeneration = `-- name: DeactivateActiveConfigGeneration :exec
 UPDATE config_generation SET active = false
 WHERE active AND id != $1
@@ -78,6 +99,29 @@ func (q *Queries) DeleteDocument(ctx context.Context, arg DeleteDocumentParams) 
 	return column_1, err
 }
 
+const deleteExpiredSubscriptions = `-- name: DeleteExpiredSubscriptions :execrows
+DELETE FROM notification_subscription
+WHERE (subject, document_uuid) IN (
+      SELECT s.subject, s.document_uuid
+      FROM notification_subscription AS s
+      WHERE s.expires_at <= $1
+      LIMIT $2::bigint
+)
+`
+
+type DeleteExpiredSubscriptionsParams struct {
+	Now   pgtype.Timestamptz
+	Limit int64
+}
+
+func (q *Queries) DeleteExpiredSubscriptions(ctx context.Context, arg DeleteExpiredSubscriptionsParams) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteExpiredSubscriptions, arg.Now, arg.Limit)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const deleteOldInboxMessages = `-- name: DeleteOldInboxMessages :exec
 DELETE FROM inbox_message
 WHERE created < now() - INTERVAL '6 months'
@@ -96,6 +140,29 @@ WHERE created < now() - INTERVAL '2 weeks'
 func (q *Queries) DeleteOldMessages(ctx context.Context) error {
 	_, err := q.db.Exec(ctx, deleteOldMessages)
 	return err
+}
+
+const deleteOldNotifications = `-- name: DeleteOldNotifications :execrows
+DELETE FROM notification
+WHERE (key, id) IN (
+      SELECT n.key, n.id
+      FROM notification AS n
+      WHERE n.created < $1
+      LIMIT $2::bigint
+)
+`
+
+type DeleteOldNotificationsParams struct {
+	Before pgtype.Timestamptz
+	Limit  int64
+}
+
+func (q *Queries) DeleteOldNotifications(ctx context.Context, arg DeleteOldNotificationsParams) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteOldNotifications, arg.Before, arg.Limit)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const deleteProperty = `-- name: DeleteProperty :one
@@ -117,6 +184,25 @@ func (q *Queries) DeleteProperty(ctx context.Context, arg DeletePropertyParams) 
 	var column_1 int32
 	err := row.Scan(&column_1)
 	return column_1, err
+}
+
+const deleteSubscriptions = `-- name: DeleteSubscriptions :execrows
+DELETE FROM notification_subscription
+WHERE subject = $1
+      AND document_uuid = ANY($2::uuid[])
+`
+
+type DeleteSubscriptionsParams struct {
+	Subject       string
+	DocumentUuids []uuid.UUID
+}
+
+func (q *Queries) DeleteSubscriptions(ctx context.Context, arg DeleteSubscriptionsParams) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteSubscriptions, arg.Subject, arg.DocumentUuids)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const ensureSchema = `-- name: EnsureSchema :exec
@@ -686,6 +772,32 @@ func (q *Queries) GetLatestMessageId(ctx context.Context, recipient string) (int
 	return latest_id, err
 }
 
+const getNotificationCursors = `-- name: GetNotificationCursors :many
+SELECT subject, key, position
+FROM notification_cursor
+WHERE subject = $1
+`
+
+func (q *Queries) GetNotificationCursors(ctx context.Context, subject string) ([]NotificationCursor, error) {
+	rows, err := q.db.Query(ctx, getNotificationCursors, subject)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []NotificationCursor
+	for rows.Next() {
+		var i NotificationCursor
+		if err := rows.Scan(&i.Subject, &i.Key, &i.Position); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const getProperties = `-- name: GetProperties :many
 SELECT owner, application, key, value, created, updated
 FROM property
@@ -996,6 +1108,49 @@ func (q *Queries) InsertMessage(ctx context.Context, arg InsertMessageParams) er
 	return err
 }
 
+const insertNotification = `-- name: InsertNotification :execrows
+INSERT INTO notification (
+      key, id, kind, document_uuid, document_type, refs, actor,
+      event_uuid, created, meta
+) VALUES (
+      $1, $2, $3, $4, $5, $6, $7,
+      $8, $9, $10
+)
+ON CONFLICT (key, event_uuid) DO NOTHING
+`
+
+type InsertNotificationParams struct {
+	Key          string
+	ID           int64
+	Kind         string
+	DocumentUuid uuid.UUID
+	DocumentType string
+	Refs         []byte
+	Actor        string
+	EventUuid    uuid.UUID
+	Created      pgtype.Timestamptz
+	Meta         []byte
+}
+
+func (q *Queries) InsertNotification(ctx context.Context, arg InsertNotificationParams) (int64, error) {
+	result, err := q.db.Exec(ctx, insertNotification,
+		arg.Key,
+		arg.ID,
+		arg.Kind,
+		arg.DocumentUuid,
+		arg.DocumentType,
+		arg.Refs,
+		arg.Actor,
+		arg.EventUuid,
+		arg.Created,
+		arg.Meta,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const listCommentThreads = `-- name: ListCommentThreads :many
 SELECT t.uuid, t.document_uuid, t.kind, t.created, t.created_by, t.updated,
        t.resolved, t.resolved_by,
@@ -1162,6 +1317,38 @@ func (q *Queries) ListConfigGenerations(ctx context.Context, arg ListConfigGener
 			&i.ActivatedAt,
 			&i.Active,
 		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listDocumentSubscriptions = `-- name: ListDocumentSubscriptions :many
+SELECT subject, document_uuid, expires_at
+FROM notification_subscription
+WHERE document_uuid = $1
+      AND (expires_at IS NULL OR expires_at > $2)
+`
+
+type ListDocumentSubscriptionsParams struct {
+	DocumentUuid uuid.UUID
+	Now          pgtype.Timestamptz
+}
+
+func (q *Queries) ListDocumentSubscriptions(ctx context.Context, arg ListDocumentSubscriptionsParams) ([]NotificationSubscription, error) {
+	rows, err := q.db.Query(ctx, listDocumentSubscriptions, arg.DocumentUuid, arg.Now)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []NotificationSubscription
+	for rows.Next() {
+		var i NotificationSubscription
+		if err := rows.Scan(&i.Subject, &i.DocumentUuid, &i.ExpiresAt); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
@@ -1505,6 +1692,140 @@ func (q *Queries) ListMessagesAfterId(ctx context.Context, arg ListMessagesAfter
 	return items, nil
 }
 
+const listNotificationsAfterID = `-- name: ListNotificationsAfterID :many
+SELECT key, id, kind, document_uuid, document_type, refs, actor,
+       event_uuid, created, meta
+FROM notification
+WHERE key = $1
+      AND id > $2
+      AND created >= $3
+ORDER BY id ASC
+LIMIT $4::bigint
+`
+
+type ListNotificationsAfterIDParams struct {
+	Key       string
+	AfterID   int64
+	NotBefore pgtype.Timestamptz
+	Limit     int64
+}
+
+func (q *Queries) ListNotificationsAfterID(ctx context.Context, arg ListNotificationsAfterIDParams) ([]Notification, error) {
+	rows, err := q.db.Query(ctx, listNotificationsAfterID,
+		arg.Key,
+		arg.AfterID,
+		arg.NotBefore,
+		arg.Limit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Notification
+	for rows.Next() {
+		var i Notification
+		if err := rows.Scan(
+			&i.Key,
+			&i.ID,
+			&i.Kind,
+			&i.DocumentUuid,
+			&i.DocumentType,
+			&i.Refs,
+			&i.Actor,
+			&i.EventUuid,
+			&i.Created,
+			&i.Meta,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listNotificationsBefore = `-- name: ListNotificationsBefore :many
+SELECT key, id, kind, document_uuid, document_type, refs, actor,
+       event_uuid, created, meta
+FROM notification
+WHERE key = ANY($1::text[])
+      AND created < $2
+ORDER BY created DESC, key DESC, id DESC
+LIMIT $3::bigint
+`
+
+type ListNotificationsBeforeParams struct {
+	Keys   []string
+	Before pgtype.Timestamptz
+	Limit  int64
+}
+
+func (q *Queries) ListNotificationsBefore(ctx context.Context, arg ListNotificationsBeforeParams) ([]Notification, error) {
+	rows, err := q.db.Query(ctx, listNotificationsBefore, arg.Keys, arg.Before, arg.Limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Notification
+	for rows.Next() {
+		var i Notification
+		if err := rows.Scan(
+			&i.Key,
+			&i.ID,
+			&i.Kind,
+			&i.DocumentUuid,
+			&i.DocumentType,
+			&i.Refs,
+			&i.Actor,
+			&i.EventUuid,
+			&i.Created,
+			&i.Meta,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listSubscriptions = `-- name: ListSubscriptions :many
+SELECT subject, document_uuid, expires_at
+FROM notification_subscription
+WHERE subject = $1
+      AND (expires_at IS NULL OR expires_at > $2)
+ORDER BY document_uuid
+`
+
+type ListSubscriptionsParams struct {
+	Subject string
+	Now     pgtype.Timestamptz
+}
+
+func (q *Queries) ListSubscriptions(ctx context.Context, arg ListSubscriptionsParams) ([]NotificationSubscription, error) {
+	rows, err := q.db.Query(ctx, listSubscriptions, arg.Subject, arg.Now)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []NotificationSubscription
+	for rows.Next() {
+		var i NotificationSubscription
+		if err := rows.Scan(&i.Subject, &i.DocumentUuid, &i.ExpiresAt); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const nextMessageID = `-- name: NextMessageID :one
 INSERT INTO message_write_lock(
       recipient, message_type, current_message_id
@@ -1527,6 +1848,25 @@ func (q *Queries) NextMessageID(ctx context.Context, arg NextMessageIDParams) (i
 	var current_message_id int64
 	err := row.Scan(&current_message_id)
 	return current_message_id, err
+}
+
+const nextNotificationID = `-- name: NextNotificationID :one
+INSERT INTO notification_sequence(
+      key, last_id
+) VALUES (
+      $1, 1
+)
+ON CONFLICT(key)
+DO UPDATE SET
+  last_id = notification_sequence.last_id + 1
+RETURNING last_id
+`
+
+func (q *Queries) NextNotificationID(ctx context.Context, key string) (int64, error) {
+	row := q.db.QueryRow(ctx, nextNotificationID, key)
+	var last_id int64
+	err := row.Scan(&last_id)
+	return last_id, err
 }
 
 const notify = `-- name: Notify :exec
@@ -1755,6 +2095,27 @@ func (q *Queries) UpsertProperty(ctx context.Context, arg UpsertPropertyParams) 
 		arg.Key,
 		arg.Value,
 	)
+	return err
+}
+
+const upsertSubscription = `-- name: UpsertSubscription :exec
+INSERT INTO notification_subscription (
+      subject, document_uuid, expires_at
+) VALUES (
+      $1, $2, $3
+)
+ON CONFLICT (subject, document_uuid) DO UPDATE
+SET expires_at = EXCLUDED.expires_at
+`
+
+type UpsertSubscriptionParams struct {
+	Subject      string
+	DocumentUuid uuid.UUID
+	ExpiresAt    pgtype.Timestamptz
+}
+
+func (q *Queries) UpsertSubscription(ctx context.Context, arg UpsertSubscriptionParams) error {
+	_, err := q.db.Exec(ctx, upsertSubscription, arg.Subject, arg.DocumentUuid, arg.ExpiresAt)
 	return err
 }
 

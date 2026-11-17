@@ -263,6 +263,56 @@ CREATE TABLE public.message_write_lock (
 
 
 --
+-- Name: notification; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.notification (
+    key text NOT NULL,
+    id bigint NOT NULL,
+    kind text NOT NULL,
+    document_uuid uuid NOT NULL,
+    document_type text NOT NULL,
+    refs jsonb DEFAULT '[]'::jsonb NOT NULL,
+    actor text NOT NULL,
+    event_uuid uuid NOT NULL,
+    created timestamp with time zone NOT NULL,
+    meta jsonb DEFAULT '{}'::jsonb NOT NULL
+);
+
+
+--
+-- Name: notification_cursor; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.notification_cursor (
+    subject text NOT NULL,
+    key text NOT NULL,
+    "position" bigint NOT NULL
+);
+
+
+--
+-- Name: notification_sequence; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.notification_sequence (
+    key text NOT NULL,
+    last_id bigint NOT NULL
+);
+
+
+--
+-- Name: notification_subscription; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.notification_subscription (
+    subject text NOT NULL,
+    document_uuid uuid NOT NULL,
+    expires_at timestamp with time zone
+);
+
+
+--
 -- Name: property; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -427,6 +477,46 @@ ALTER TABLE ONLY public.message_write_lock
 
 
 --
+-- Name: notification_cursor notification_cursor_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.notification_cursor
+    ADD CONSTRAINT notification_cursor_pkey PRIMARY KEY (subject, key);
+
+
+--
+-- Name: notification notification_key_event_uuid_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.notification
+    ADD CONSTRAINT notification_key_event_uuid_key UNIQUE (key, event_uuid);
+
+
+--
+-- Name: notification notification_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.notification
+    ADD CONSTRAINT notification_pkey PRIMARY KEY (key, id);
+
+
+--
+-- Name: notification_sequence notification_sequence_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.notification_sequence
+    ADD CONSTRAINT notification_sequence_pkey PRIMARY KEY (key);
+
+
+--
+-- Name: notification_subscription notification_subscription_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.notification_subscription
+    ADD CONSTRAINT notification_subscription_pkey PRIMARY KEY (subject, document_uuid);
+
+
+--
 -- Name: property property_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -498,6 +588,20 @@ CREATE INDEX eventlog_owner_id_idx ON public.eventlog USING btree (owner, id);
 --
 
 CREATE INDEX inbox_message_recipient_id_idx ON public.inbox_message USING btree (recipient, id);
+
+
+--
+-- Name: notification_created_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX notification_created_idx ON public.notification USING btree (created);
+
+
+--
+-- Name: notification_subscription_document_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX notification_subscription_document_idx ON public.notification_subscription USING btree (document_uuid);
 
 
 --
