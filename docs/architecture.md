@@ -197,6 +197,17 @@ delivered. Two mechanisms, same principle:
   rest of the transaction (`nextMessageID`, `internal/messages_store.go`). Gapless and
   commit-ordered per recipient. The retention cleaner leaves the lock rows
   alone, so ids never restart after old messages are deleted.
+- **Notification ids** are per key, from `notification_sequence`, the same
+  upsert as `message_write_lock` (`insertNotifications`,
+  `internal/notifications_store.go`). One event addresses several keys, so
+  the fan-out takes their sequence rows in sorted key order, all of them
+  before it stamps `created`, and two fan-outs with overlapping keys cannot
+  deadlock. They are the last locks the transaction takes: a writer with rows
+  of its own locks those first. A retried event is skipped before its key's
+  row is taken; only two writers racing with the same event leave a gap,
+  which a tail on `id > position` never notices. The cleaner leaves the
+  sequence rows alone. `TestConcurrentNotificationFanOut` deadlocks without
+  the sort.
 
 **The counter must be the last lock a transaction acquires.** It is shared by
 every eventlog writer, so a transaction holding it while it goes on to lock
@@ -364,8 +375,12 @@ log and stream are meant to replace it; neither exists yet.
 `RunCleaner` (`internal/store.go`) runs under `joblock.Run` with lock name
 `cleaner`, so one replica at a time owns it. **The first sweep runs as soon as
 the lock is acquired**, then a ticker fires every `CLEANUP_INTERVAL` (default
-12 h); each sweep deletes `message` rows older than two weeks and
-`inbox_message` rows older than six months. Sweeping on acquisition is what
+12 h); each sweep deletes `message` rows older than two weeks,
+`inbox_message` rows older than six months, expired
+`notification_subscription` rows and `notification` rows older than
+`NOTIFICATION_RETENTION` (180 days). The two feed steps delete 1000 rows a
+statement until a statement deletes fewer, so a backlog never holds one long
+transaction. Sweeping on acquisition is what
 makes the interval a ceiling rather than a minimum: a lock that changes hands
 on every deploy would otherwise restart the countdown each time and never
 reach a tick. A failed sweep is logged and left for the next tick without
@@ -377,7 +392,7 @@ elephantine's `docs/joblock-restart-semantics.md`.
 
 ## Real-time plumbing
 
-Seven Postgres NOTIFY channels, one `pg.FanOut` each on `PGStore`, one LISTEN
+Eight Postgres NOTIFY channels, one `pg.FanOut` each on `PGStore`, one LISTEN
 connection per replica (`pg.Subscriber` on the direct pool):
 
 | Channel | Published by | Woken consumers |
@@ -389,6 +404,7 @@ connection per replica (`pg.Subscriber` on the direct pool):
 | `schema_update` | generation activation | validator reload loop, `GetActiveConfigGeneration` long-polls |
 | `deprecation_update` | `UpdateDeprecation` | validator reload loop |
 | `comment_update` | every comment and thread write | `WaitForComments` handlers waiting on the event's document (`OnCommentUpdate`) |
+| `notification_update` | the feed fan-out, once per key written, payload `{key, id}` | nobody yet |
 
 `pg_notify` is always issued inside the writing transaction; Postgres delivers
 it at commit and discards it on rollback. **LISTEN is a session-level command
