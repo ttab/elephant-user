@@ -441,3 +441,102 @@ WHERE c.mentioned @> ARRAY[@subject::text]
            OR c.created < sqlc.narg('before')::timestamptz)
 ORDER BY c.created DESC, c.uuid DESC
 LIMIT sqlc.arg('limit')::bigint;
+
+-- name: NextNotificationID :one
+INSERT INTO notification_sequence(
+      key, last_id
+) VALUES (
+      @key, 1
+)
+ON CONFLICT(key)
+DO UPDATE SET
+  last_id = notification_sequence.last_id + 1
+RETURNING last_id;
+
+-- name: InsertNotification :execrows
+INSERT INTO notification (
+      key, id, kind, document_uuid, document_type, refs, actor,
+      event_uuid, created, meta
+) VALUES (
+      @key, @id, @kind, @document_uuid, @document_type, @refs, @actor,
+      @event_uuid, @created, @meta
+)
+ON CONFLICT (key, event_uuid) DO NOTHING;
+
+-- name: ListNotificationsAfterID :many
+SELECT key, id, kind, document_uuid, document_type, refs, actor,
+       event_uuid, created, meta
+FROM notification
+WHERE key = @key
+      AND id > @after_id
+      AND created >= @not_before
+ORDER BY id ASC
+LIMIT sqlc.arg('limit')::bigint;
+
+-- name: ListNotificationsBefore :many
+SELECT key, id, kind, document_uuid, document_type, refs, actor,
+       event_uuid, created, meta
+FROM notification
+WHERE key = ANY(@keys::text[])
+      AND created < @before
+ORDER BY created DESC, key DESC, id DESC
+LIMIT sqlc.arg('limit')::bigint;
+
+-- name: ListDocumentSubscriptions :many
+SELECT subject, document_uuid, expires_at
+FROM notification_subscription
+WHERE document_uuid = @document_uuid
+      AND (expires_at IS NULL OR expires_at > @now);
+
+-- name: UpsertSubscription :exec
+INSERT INTO notification_subscription (
+      subject, document_uuid, expires_at
+) VALUES (
+      @subject, @document_uuid, @expires_at
+)
+ON CONFLICT (subject, document_uuid) DO UPDATE
+SET expires_at = EXCLUDED.expires_at;
+
+-- name: DeleteSubscriptions :execrows
+DELETE FROM notification_subscription
+WHERE subject = @subject
+      AND document_uuid = ANY(@document_uuids::uuid[]);
+
+-- name: ListSubscriptions :many
+SELECT subject, document_uuid, expires_at
+FROM notification_subscription
+WHERE subject = @subject
+      AND (expires_at IS NULL OR expires_at > @now)
+ORDER BY document_uuid;
+
+-- name: GetNotificationCursors :many
+SELECT subject, key, position
+FROM notification_cursor
+WHERE subject = @subject;
+
+-- name: BumpNotificationCursor :exec
+INSERT INTO notification_cursor (
+      subject, key, position
+) VALUES (
+      @subject, @key, @position
+)
+ON CONFLICT (subject, key) DO UPDATE
+SET position = GREATEST(notification_cursor.position, EXCLUDED.position);
+
+-- name: DeleteExpiredSubscriptions :execrows
+DELETE FROM notification_subscription
+WHERE (subject, document_uuid) IN (
+      SELECT s.subject, s.document_uuid
+      FROM notification_subscription AS s
+      WHERE s.expires_at <= @now
+      LIMIT sqlc.arg('limit')::bigint
+);
+
+-- name: DeleteOldNotifications :execrows
+DELETE FROM notification
+WHERE (key, id) IN (
+      SELECT n.key, n.id
+      FROM notification AS n
+      WHERE n.created < @before
+      LIMIT sqlc.arg('limit')::bigint
+);

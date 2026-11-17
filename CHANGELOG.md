@@ -4,6 +4,16 @@ All notable changes to elephant-user from v1.0.0 onwards are documented here.
 Entries are derived from the release tags; the linked pull requests hold the
 detail. Earlier history is not reconstructed.
 
+## [v1.11.0] - Unreleased
+
+**Migrations:**
+
+- `schema/007_notifications.sql` creates the notification feed tables:
+  `notification`, `notification_sequence`, `notification_cursor` and
+  `notification_subscription`. It touches no existing row. Run it before the
+  deploy; no service window. A rollback drops the tables and every
+  notification, subscription and cursor in them.
+
 ## [v1.10.0] - 2026-11-16
 
 **Behaviour change (comment kinds):** `CreateComment` accepted any string as

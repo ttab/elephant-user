@@ -285,6 +285,12 @@ window. Deployed without it, every comments write and read fails as
 tables, and every comment with them, and leaves `comments` in the type; the
 migration adds it with `IF NOT EXISTS` and can run again on top of it.
 
+`schema/007_notifications.sql` (v1.11.0) adds the notification feed tables:
+`notification`, `notification_sequence`, `notification_cursor` and
+`notification_subscription`. It touches no existing row and old code ignores
+what it adds: run it before the deploy, no service window. A rollback drops
+the four tables, and every notification, subscription and cursor with them.
+
 The `job_lock` table is elephantine's; `schema/vendor.json` declares that and
 `001_messages.sql` asserts it created the table by hand
 (`-- covers:`). `go test ./schema/` fails when elephantine ships a migration
