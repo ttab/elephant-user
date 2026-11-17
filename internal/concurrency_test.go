@@ -11,6 +11,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/ttab/elephant-api/newsdoc"
 	"github.com/ttab/elephant-user/internal"
 	"github.com/ttab/elephantine/test"
@@ -715,6 +716,203 @@ func TestConcurrentCommentPosts(t *testing.T) {
 		if !c.After(released) {
 			t.Fatalf("a post was stamped at %s, before the lock was released at %s",
 				c.Format(time.RFC3339Nano), released.Format(time.RFC3339Nano))
+		}
+	}
+}
+
+// TestConcurrentNotificationFanOut verifies that fan-outs to overlapping key
+// sets all succeed and leave every key with dense ids in commit order. Each
+// writer passes its keys in its own order; the fan-out locks them sorted, so
+// two writers holding a key the other wants next cannot deadlock. Postgres
+// would break such a deadlock by failing one of them, which shows up here
+// as a writer error. Ids are checked against created, which is stamped
+// after every key is locked and so follows id order within a key.
+func TestConcurrentNotificationFanOut(t *testing.T) {
+	eu := startElephantUser(t)
+	ctx := t.Context()
+
+	const (
+		writers         = 8
+		eventsPerWriter = 25
+	)
+
+	keys := []string{
+		"core://user/a",
+		"core://user/b",
+		"core://unit/c",
+		"core://org/d",
+	}
+
+	// Writer w addresses three of the four keys, starting at a rotating
+	// offset and walking backwards on odd writers, so every pair of
+	// writers overlaps and they name the shared keys in different orders.
+	writerKeys := func(w int) []string {
+		var ks []string
+
+		for i := range 3 {
+			idx := (w + i) % len(keys)
+			if w%2 == 1 {
+				idx = (w + len(keys) - i) % len(keys)
+			}
+
+			ks = append(ks, keys[idx])
+		}
+
+		return ks
+	}
+
+	want := make(map[string]int)
+
+	for w := range writers {
+		for _, k := range writerKeys(w) {
+			want[k] += eventsPerWriter
+		}
+	}
+
+	var (
+		start = make(chan struct{})
+		wg    sync.WaitGroup
+	)
+
+	for w := range writers {
+		wg.Go(func() {
+			<-start
+
+			for i := range eventsPerWriter {
+				written, err := eu.Store.InsertNotifications(ctx,
+					internal.NotificationSourceEvent{
+						Family:       internal.NotificationFamilyIngest,
+						Kind:         "se.ecms.local.test.updated",
+						DocumentUUID: uuid.New(),
+						DocumentType: "core/article",
+						Actor:        fmt.Sprintf("core://user/writer-%d", w),
+						EventUUID:    uuid.New(),
+					}, writerKeys(w))
+				if err != nil {
+					t.Errorf("writer %d event %d: %v", w, i, err)
+
+					return
+				}
+
+				if len(written) != 3 {
+					t.Errorf("writer %d event %d: wrote %d rows, want 3",
+						w, i, len(written))
+
+					return
+				}
+			}
+		})
+	}
+
+	close(start)
+	wg.Wait()
+
+	if t.Failed() {
+		return
+	}
+
+	for _, key := range keys {
+		rows, err := eu.Store.ListNotificationsAfterID(
+			ctx, key, 0, time.Time{}, 1000)
+		test.Mustf(t, err, "list rows under %s", key)
+
+		test.Equalf(t, want[key], len(rows), "rows under %s", key)
+
+		for i, r := range rows {
+			if r.ID != int64(i+1) {
+				t.Fatalf("%s: id %d at index %d, ids are not dense",
+					key, r.ID, i)
+			}
+
+			if i > 0 && r.Created.Before(rows[i-1].Created) {
+				t.Fatalf("%s: id %d created %s before id %d at %s",
+					key, r.ID, r.Created.Format(time.RFC3339Nano),
+					rows[i-1].ID, rows[i-1].Created.Format(time.RFC3339Nano))
+			}
+		}
+	}
+
+	counted := testutil.ToFloat64(eu.Metrics.NotificationsWritten.WithLabelValues(
+		string(internal.NotificationFamilyIngest)))
+
+	test.Equalf(t, float64(writers*eventsPerWriter*3), counted,
+		"rows counted as written")
+}
+
+// TestConcurrentNotificationRepeat verifies that one event written under
+// the same key by several writers at once, and again afterwards, leaves a
+// single row: the unique (key, event_uuid) makes every write but the first
+// a no-op.
+func TestConcurrentNotificationRepeat(t *testing.T) {
+	eu := startElephantUser(t)
+	ctx := t.Context()
+
+	const (
+		rounds  = 20
+		writers = 6
+	)
+
+	key := "core://user/repeat"
+
+	for round := range rounds {
+		event := internal.NotificationSourceEvent{
+			Family:       internal.NotificationFamilyIngest,
+			Kind:         "se.ecms.local.test.updated",
+			DocumentUUID: uuid.New(),
+			DocumentType: "core/article",
+			Actor:        "core://user/writer",
+			EventUUID:    uuid.New(),
+		}
+
+		var (
+			start   = make(chan struct{})
+			wg      sync.WaitGroup
+			mu      sync.Mutex
+			winners int
+		)
+
+		for i := range writers {
+			wg.Go(func() {
+				<-start
+
+				written, err := eu.Store.InsertNotifications(
+					ctx, event, []string{key, key})
+				if err != nil {
+					t.Errorf("round %d writer %d: %v", round, i, err)
+
+					return
+				}
+
+				mu.Lock()
+				winners += len(written)
+				mu.Unlock()
+			})
+		}
+
+		close(start)
+		wg.Wait()
+
+		if t.Failed() {
+			return
+		}
+
+		test.Equalf(t, 1, winners, "round %d: writes that wrote a row", round)
+
+		written, err := eu.Store.InsertNotifications(ctx, event, []string{key})
+		test.Mustf(t, err, "round %d: repeat the event", round)
+
+		test.Equalf(t, 0, len(written), "round %d: rows written by the repeat", round)
+	}
+
+	rows, err := eu.Store.ListNotificationsAfterID(ctx, key, 0, time.Time{}, 1000)
+	test.Mustf(t, err, "list rows")
+
+	test.Equalf(t, rounds, len(rows), "one row per event")
+
+	for i := 1; i < len(rows); i++ {
+		if rows[i].ID <= rows[i-1].ID {
+			t.Fatalf("ids not ascending at index %d: %d after %d",
+				i, rows[i].ID, rows[i-1].ID)
 		}
 	}
 }

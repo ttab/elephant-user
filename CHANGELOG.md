@@ -14,6 +14,17 @@ detail. Earlier history is not reconstructed.
   deploy; no service window. A rollback drops the tables and every
   notification, subscription and cursor in them.
 
+Changes:
+
+- New flags `--subscription-ttl` (`SUBSCRIPTION_TTL`, default `24h`), the
+  lifetime of a notification subscription that gives none of its own, and
+  `--notification-retention` (`NOTIFICATION_RETENTION`, default `4320h`, 180
+  days), how long the cleaner keeps notification feed rows. The cleaner also
+  deletes expired subscriptions.
+- New metrics `elephant_user_notifications_written_total{family}` and
+  `elephant_user_cleaner_deletions_total{item}`; see
+  [docs/observability.md](docs/observability.md#notification-feed).
+
 ## [v1.10.0] - 2026-11-16
 
 **Behaviour change (comment kinds):** `CreateComment` accepted any string as

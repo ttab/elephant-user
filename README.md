@@ -189,11 +189,18 @@ Provided by elephantine's `AuthenticationCLIFlags`.
 |---|---|---|---|
 | `--repository-endpoint` | `REPOSITORY_ENDPOINT` | | Base URL of elephant-repository, asked over Connect for the caller's permissions on a document with the caller's own token; 5 s timeout, answers cached 30 s. Empty: every `Comments` RPC but `ListMentions` answers `permission_denied`. |
 
+### Notification feed
+
+| Flag | Env | Default | What it does |
+|---|---|---|---|
+| `--subscription-ttl` | `SUBSCRIPTION_TTL` | `24h` | How long a notification subscription lives when the subscriber gives no TTL, until time or permanent flag of its own. Subscribing again refreshes it. |
+
 ### Background work
 
 | Flag | Env | Default | What it does |
 |---|---|---|---|
-| `--cleanup-interval` | `CLEANUP_INTERVAL` | `12h` | How often the retention cleaner deletes system messages older than two weeks and inbox messages older than six months. Runs on one replica at a time under the `cleaner` job lock. The sweep is cheap; hourly is the sensible lower bound. |
+| `--cleanup-interval` | `CLEANUP_INTERVAL` | `12h` | How often the retention cleaner deletes system messages after two weeks, inbox messages after six months, expired subscriptions and old notifications. One replica at a time, under the `cleaner` job lock; hourly is the sensible lower bound. |
+| `--notification-retention` | `NOTIFICATION_RETENTION` | `4320h` (180 days) | How old a notification feed row gets before the cleaner deletes it. Expired subscriptions are deleted on every sweep regardless. A Go duration, so days are written in hours. |
 
 ## Pending work
 

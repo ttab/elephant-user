@@ -165,12 +165,18 @@ the worst case, two replicas can validate against different generations.
 every CLEANUP_INTERVAL (12h), on the replica holding job lock "cleaner":
   DELETE FROM message        WHERE created < now() - 2 weeks
   DELETE FROM inbox_message  WHERE created < now() - 6 months
+  DELETE FROM notification_subscription WHERE expires_at <= now()
+  DELETE FROM notification   WHERE created < now() - NOTIFICATION_RETENTION (180 days)
+    (the two feed steps 1000 rows a statement, repeated until one deletes fewer)
 ```
 
 The first sweep runs as soon as a replica acquires the lock, so a deploy
 never postpones retention. `message_write_lock` rows are never deleted, so a
 recipient's ids keep counting up after their old messages are gone. Consumers should not treat
-`after_id` gaps at the low end as missing messages.
+`after_id` gaps at the low end as missing messages. The same holds for
+`notification_sequence`: never deleted, so a key's ids never restart. The
+feed steps count what they delete in
+`elephant_user_cleaner_deletions_total{item}`.
 
 ### 5. A comment write
 
@@ -203,7 +209,7 @@ until something else removes them.
 
 | Lock | Does | When nobody holds it |
 |---|---|---|
-| `cleaner` | the retention sweep above | tables grow; nothing is lost; `sum(pg_job_lock_held{name="cleaner"})` is 0 |
+| `cleaner` | the retention sweep above, feed rows and expired subscriptions included | tables grow; nothing is lost; `sum(pg_job_lock_held{name="cleaner"})` is 0 |
 
 ## Where state lives
 
@@ -221,6 +227,10 @@ Everything is in Postgres and Postgres is authoritative for all of it.
 | `comment_thread` | one row per thread, keyed by the client's uuid, with the repository document it is on | no FK to the document; never deleted |
 | `comment` | one row per comment, payload and derived `mentioned` | a deleted comment keeps its row and payload; no retention |
 | `message_write_lock` | per-recipient id counters for `message` | never cleaned |
+| `notification` | the feed: one row per event and key (user, unit or org uri), unique `(key, event_uuid)` | ids per key from `notification_sequence`; retention `NOTIFICATION_RETENTION` (180 days) |
+| `notification_sequence` | per-key id counters for `notification` | never cleaned |
+| `notification_cursor` | a subject's delivered position per key | moves forward only |
+| `notification_subscription` | a subject's interest in a document, `expires_at` null for permanent | expired rows deleted by the cleaner |
 | `document_schema`, `config_generation`, `config_generation_schema`, `deprecation` | schema configuration | exactly one generation is active |
 | `job_lock` | the cleaner lock | rows are transient |
 | `schema_version` | tern's migration marker | |
