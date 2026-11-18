@@ -14,6 +14,7 @@ import (
 	userv1 "github.com/ttab/elephant-api/elephant/user/v1"
 	"github.com/ttab/elephant-api/elephant/user/v1/userv1connect"
 	"github.com/ttab/elephantine"
+	"github.com/ttab/elephantine/pg"
 	"github.com/ttab/elephantine/rpc"
 )
 
@@ -51,31 +52,61 @@ type NotificationsStore interface {
 	ListDocumentSubscribers(
 		ctx context.Context, documentUUID uuid.UUID,
 	) ([]string, error)
+	ListNotificationsAfterID(
+		ctx context.Context, key string, afterID int64,
+		notBefore time.Time, size int64,
+	) ([]Notification, error)
+	GetNotificationCursors(
+		ctx context.Context, subject string,
+	) (map[string]int64, error)
+	BumpNotificationCursor(
+		ctx context.Context, subject string, key string, position int64,
+	) error
 }
 
 // Interface guard.
 var _ NotificationsStore = &PGStore{}
 
-// NotificationsService implements the unary NotificationsService RPCs.
-// Every RPC but Ingest needs the user scope; Ingest needs user_notify and
-// nothing else will do. Stream is not served yet and answers unimplemented.
+// NotificationsService implements the NotificationsService RPCs. Every RPC
+// but Ingest needs the user scope; Ingest needs user_notify and nothing
+// else will do. Stream is in notifications_stream.go.
 type NotificationsService struct {
-	userv1connect.UnimplementedNotificationsServiceHandler
+	logger        *slog.Logger
+	store         NotificationsStore
+	notifications *pg.FanOut[NotificationEvent]
+	permissions   DocumentPermissions
+	metrics       *Metrics
 
-	logger      *slog.Logger
-	store       NotificationsStore
-	permissions DocumentPermissions
+	streamKeepalive     time.Duration
+	streamReplayDefault time.Duration
+	streamReplayMax     time.Duration
 }
 
+// NewNotificationsService creates the service. notifications is the fan-out
+// of the notification_update channel, which wakes the streams.
 func NewNotificationsService(
 	logger *slog.Logger, store NotificationsStore,
-	permissions DocumentPermissions,
+	notifications *pg.FanOut[NotificationEvent],
+	permissions DocumentPermissions, metrics *Metrics,
+	opts ...NotificationsServiceOption,
 ) *NotificationsService {
-	return &NotificationsService{
-		logger:      logger,
-		store:       store,
-		permissions: permissions,
+	s := NotificationsService{
+		logger:        logger,
+		store:         store,
+		notifications: notifications,
+		permissions:   permissions,
+		metrics:       metrics,
+
+		streamKeepalive:     DefaultStreamKeepalive,
+		streamReplayDefault: DefaultStreamReplay,
+		streamReplayMax:     DefaultStreamReplayMax,
 	}
+
+	for _, opt := range opts {
+		opt(&s)
+	}
+
+	return &s
 }
 
 // Interface guard.

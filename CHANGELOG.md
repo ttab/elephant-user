@@ -23,9 +23,13 @@ Changes:
 
 - New Connect-only service `elephant.user.v1.NotificationsService`, without
   a Twirp mount: `Subscribe`, `Unsubscribe`, `ListSubscriptions`,
-  `ListNotifications` and `Ingest`. `Stream` answers `unimplemented` for now.
-  Permissions and error codes are in
-  [RPC APIs](docs/architecture.md#rpc-apis).
+  `ListNotifications`, `Ingest` and the server stream `Stream`. Permissions
+  and error codes are in [RPC APIs](docs/architecture.md#rpc-apis).
+- `Stream` replays the rows after the caller's server-held cursor for each of
+  its keys, no older than `replay_window_seconds`, then sends live rows and a
+  `Keepalive` when it has been quiet. It ends with `unauthenticated` when the
+  token expires and `unavailable` on a deploy drain; a client reopens it in
+  both cases.
 - New scope `user_notify`, the only scope that may call `Ingest`; grant it to
   producer clients.
 - New flags `--subscription-ttl` (`SUBSCRIPTION_TTL`, default `24h`), the
@@ -33,9 +37,17 @@ Changes:
   `--notification-retention` (`NOTIFICATION_RETENTION`, default `4320h`, 180
   days), how long the cleaner keeps notification feed rows. The cleaner also
   deletes expired subscriptions.
+- New flags `--stream-keepalive` (`STREAM_KEEPALIVE`, default `20s`), how
+  long a stream stays quiet before a keepalive, `--stream-replay-default`
+  (`STREAM_REPLAY_DEFAULT`, default `24h`), the replay window of a request
+  that asks for none, and `--stream-replay-max` (`STREAM_REPLAY_MAX`, default
+  `168h`, 7 days), the cap on what a request may ask for.
 - New metrics `elephant_user_notifications_written_total{family}` and
   `elephant_user_cleaner_deletions_total{item}`; see
   [docs/observability.md](docs/observability.md#notification-feed).
+- New metrics `elephant_user_stream_notifications_sent_total{reason}`,
+  `elephant_user_stream_keepalives_total` and
+  `elephant_user_stream_wakeups_dropped_total`.
 - Dependency upgrades: elephant-api to v0.30.0, the release carrying the
   `NotificationsService` and dropping `WaitForComments`.
 
