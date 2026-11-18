@@ -277,6 +277,8 @@ func runUser(ctx context.Context, cmd *cli.Command) error {
 	configurationService := internal.NewConfigurationService(logger, store)
 	commentsService := internal.NewCommentsService(
 		store, validator, documentPermissions)
+	notificationsService := internal.NewNotificationsService(
+		logger, store, documentPermissions)
 
 	err = internal.Run(ctx, internal.Parameters{
 		Logger:               logger,
@@ -287,6 +289,7 @@ func runUser(ctx context.Context, cmd *cli.Command) error {
 		SettingsService:      settingsService,
 		ConfigurationService: configurationService,
 		CommentsService:      commentsService,
+		NotificationsService: notificationsService,
 		Subscriber:           subscriber,
 		Store:                store,
 		CleanupInterval:      cleanupInterval,

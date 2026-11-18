@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/ttab/elephant-api/elephant/user/v1/userv1connect"
 	"github.com/ttab/elephant-api/user"
 	"github.com/ttab/elephant-api/user/userconnect"
 	"github.com/ttab/elephantine"
@@ -22,6 +23,7 @@ type Parameters struct {
 	SettingsService      *SettingsService
 	ConfigurationService *ConfigurationService
 	CommentsService      *CommentsService
+	NotificationsService *NotificationsService
 
 	// Subscriber is the pg LISTEN subscriber to run alongside the
 	// server. Optional; tests run their own.
@@ -82,11 +84,16 @@ func Run(ctx context.Context, p Parameters) error {
 		p.ConfigurationService, handlerOpts...)
 	commentsPath, commentsHandler := userconnect.NewCommentsServiceHandler(
 		p.CommentsService, handlerOpts...)
+	// Connect only (/elephant.user.v1.NotificationsService/): there is
+	// no Twirp mount for it.
+	notificationsPath, notificationsHandler := userv1connect.NewNotificationsServiceHandler(
+		p.NotificationsService, handlerOpts...)
 
 	p.APIServer.RegisterConnect(messagesPath, messagesHandler, opts)
 	p.APIServer.RegisterConnect(settingsPath, settingsHandler, opts)
 	p.APIServer.RegisterConnect(configurationPath, configurationHandler, opts)
 	p.APIServer.RegisterConnect(commentsPath, commentsHandler, opts)
+	p.APIServer.RegisterConnect(notificationsPath, notificationsHandler, opts)
 
 	grp := elephantine.NewErrGroup(ctx, p.Logger,
 		elephantine.WithErrGroupMetricsRegisterer(p.Registerer))

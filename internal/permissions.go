@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"connectrpc.com/connect"
+	"github.com/google/uuid"
 	"github.com/jellydator/ttlcache/v3"
 	"github.com/ttab/elephant-api/repository"
 	"github.com/ttab/elephant-api/repository/repositoryconnect"
@@ -77,6 +78,46 @@ func (NoDocumentPermissions) Permissions(
 	_ context.Context, _ string,
 ) (DocumentPermissionSet, error) {
 	return DocumentPermissionSet{}, nil
+}
+
+// documentAccess is the permission a handler needs on a document.
+type documentAccess string
+
+const (
+	accessRead  documentAccess = "read"
+	accessWrite documentAccess = "write"
+)
+
+// requireDocumentAccess checks that the caller has the access on the
+// document: permission_denied when the repository does not grant it,
+// not_found for a document the repository does not know.
+func requireDocumentAccess(
+	ctx context.Context, permissions DocumentPermissions,
+	documentUUID uuid.UUID, access documentAccess,
+) error {
+	set, err := permissions.Permissions(ctx, documentUUID.String())
+	if errors.Is(err, ErrDocumentNotFound) {
+		return rpc.NotFound(fmt.Sprintf(
+			"no such document %s", documentUUID))
+	}
+
+	if err != nil {
+		return rpc.Internalf(
+			"check %s permission on document %s: %w",
+			access, documentUUID, err)
+	}
+
+	granted := set.Read
+	if access == accessWrite {
+		granted = set.Write
+	}
+
+	if !granted {
+		return rpc.PermissionDeniedf(
+			"no %s permission on document %s", access, documentUUID)
+	}
+
+	return nil
 }
 
 // RepositoryDocumentPermissionsOption configures a

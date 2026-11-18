@@ -19,28 +19,6 @@ import (
 // Interface guard.
 var _ CommentsStore = &PGStore{}
 
-// maxNotifyPayload is the largest payload Postgres accepts for a NOTIFY:
-// it must be shorter than 8000 bytes in a default build.
-const maxNotifyPayload = 7999
-
-// OnCommentUpdate notifies ch of comment changes on any of the given
-// documents. Subscription is cancelled with the context. Delivery is best
-// effort: a non-blocking send on ch, so a busy receiver with an unbuffered
-// channel misses events.
-func (s *PGStore) OnCommentUpdate(
-	ctx context.Context, ch chan CommentEvent,
-	documentUUIDs []uuid.UUID,
-) {
-	docs := make(map[uuid.UUID]bool, len(documentUUIDs))
-	for _, d := range documentUUIDs {
-		docs[d] = true
-	}
-
-	go s.Comments.Listen(ctx, ch, func(e CommentEvent) bool {
-		return docs[e.DocumentUUID]
-	})
-}
-
 // CreateComment implements [CommentsStore]. It posts the comment to the
 // thread comment.ThreadUUID, creating the thread on documentUUID with kind
 // when it does not exist yet; for an existing thread documentUUID may be
@@ -131,39 +109,6 @@ func (s *PGStore) CreateComment(
 			})
 			if err != nil {
 				return fmt.Errorf("touch thread: %w", err)
-			}
-		}
-
-		event := CommentEvent{
-			DocumentUUID: row.DocumentUuid,
-			ThreadUUID:   row.UUID,
-			Actor:        comment.Author,
-			Kind:         row.Kind,
-			Time:         now,
-		}
-
-		if threadCreated {
-			err = notifyCommentUpdated(ctx, q,
-				event.withType(CommentEventThreadCreated))
-			if err != nil {
-				return err
-			}
-		}
-
-		commentEvent := event.withType(CommentEventCommentCreated)
-		commentEvent.CommentUUID = &comment.UUID
-		commentEvent.Mentioned = mentioned
-
-		err = notifyCommentUpdated(ctx, q, commentEvent)
-		if err != nil {
-			return err
-		}
-
-		if reopened {
-			err = notifyCommentUpdated(ctx, q,
-				event.withType(CommentEventThreadReopened))
-			if err != nil {
-				return err
 			}
 		}
 
@@ -335,17 +280,7 @@ func (s *PGStore) UpdateComment(
 			return fmt.Errorf("update comment: %w", err)
 		}
 
-		event, err := touchThreadForComment(ctx, q, row.ThreadUuid, now)
-		if err != nil {
-			return err
-		}
-
-		event.Type = CommentEventCommentUpdated
-		event.CommentUUID = &commentUUID
-		event.Actor = author
-		event.Mentioned = mentioned
-
-		err = notifyCommentUpdated(ctx, q, event)
+		err = touchThread(ctx, q, row.ThreadUuid, now)
 		if err != nil {
 			return err
 		}
@@ -396,16 +331,7 @@ func (s *PGStore) DeleteComment(
 			return fmt.Errorf("delete comment: %w", err)
 		}
 
-		event, err := touchThreadForComment(ctx, q, row.ThreadUuid, now)
-		if err != nil {
-			return err
-		}
-
-		event.Type = CommentEventCommentDeleted
-		event.CommentUUID = &commentUUID
-		event.Actor = actor
-
-		return notifyCommentUpdated(ctx, q, event)
+		return touchThread(ctx, q, row.ThreadUuid, now)
 	})
 }
 
@@ -425,35 +351,24 @@ func lockComment(
 	return row, nil
 }
 
-// touchThreadForComment bumps the thread's updated time after a comment
-// change and returns an event carrying the thread's document and kind.
-func touchThreadForComment(
+// touchThread bumps the thread's updated time after a comment change.
+func touchThread(
 	ctx context.Context, q *postgres.Queries,
 	threadUUID uuid.UUID, now time.Time,
-) (CommentEvent, error) {
+) error {
 	err := q.TouchCommentThread(ctx, postgres.TouchCommentThreadParams{
 		Updated: pg.Time(now),
 		UUID:    threadUUID,
 	})
 	if err != nil {
-		return CommentEvent{}, fmt.Errorf("touch thread: %w", err)
+		return fmt.Errorf("touch thread: %w", err)
 	}
 
-	thread, err := q.GetCommentThread(ctx, threadUUID)
-	if err != nil {
-		return CommentEvent{}, fmt.Errorf("get thread: %w", err)
-	}
-
-	return CommentEvent{
-		DocumentUUID: thread.DocumentUuid,
-		ThreadUUID:   thread.UUID,
-		Kind:         thread.Kind,
-		Time:         now,
-	}, nil
+	return nil
 }
 
 // ResolveThread implements [CommentsStore]. Resolving a resolved thread is
-// a successful no-op and announces nothing.
+// a successful no-op.
 func (s *PGStore) ResolveThread(
 	ctx context.Context, threadUUID uuid.UUID, actor string,
 ) (*CommentThread, error) {
@@ -461,7 +376,7 @@ func (s *PGStore) ResolveThread(
 }
 
 // ReopenThread implements [CommentsStore]. Reopening an open thread is a
-// successful no-op and announces nothing.
+// successful no-op.
 func (s *PGStore) ReopenThread(
 	ctx context.Context, threadUUID uuid.UUID, actor string,
 ) (*CommentThread, error) {
@@ -488,7 +403,6 @@ func (s *PGStore) setThreadResolved(
 
 		if row.Resolved.Valid != resolve {
 			now := time.Now()
-			eventType := CommentEventThreadResolved
 
 			if resolve {
 				err = q.ResolveCommentThread(ctx, postgres.ResolveCommentThreadParams{
@@ -497,8 +411,6 @@ func (s *PGStore) setThreadResolved(
 					UUID:       threadUUID,
 				})
 			} else {
-				eventType = CommentEventThreadReopened
-
 				err = q.ReopenCommentThread(ctx, postgres.ReopenCommentThreadParams{
 					Updated: pg.Time(now),
 					UUID:    threadUUID,
@@ -507,18 +419,6 @@ func (s *PGStore) setThreadResolved(
 
 			if err != nil {
 				return fmt.Errorf("update thread: %w", err)
-			}
-
-			err = notifyCommentUpdated(ctx, q, CommentEvent{
-				Type:         eventType,
-				DocumentUUID: row.DocumentUuid,
-				ThreadUUID:   row.UUID,
-				Actor:        actor,
-				Kind:         row.Kind,
-				Time:         now,
-			})
-			if err != nil {
-				return err
 			}
 		}
 
@@ -774,79 +674,4 @@ func mentionedSubjects(payload json.RawMessage) ([]string, error) {
 	slices.Sort(subjects)
 
 	return slices.Compact(subjects), nil
-}
-
-func (e CommentEvent) withType(t CommentEventType) CommentEvent {
-	e.Type = t
-
-	return e
-}
-
-// notifyCommentUpdated publishes the event on comment_update. The payload
-// must stay under the NOTIFY limit, and the mention list is the only part
-// of it without a bound, so it is truncated to what fits. A listener loses
-// nothing by that: the event is a wakeup and readers re-read the comment.
-func notifyCommentUpdated(
-	ctx context.Context, q *postgres.Queries, event CommentEvent,
-) error {
-	event, err := fitNotifyPayload(event)
-	if err != nil {
-		return err
-	}
-
-	err = pgNotify(ctx, q, NotifyChannelCommentUpdate, event)
-	if err != nil {
-		return fmt.Errorf("notify comment update: %w", err)
-	}
-
-	return nil
-}
-
-// fitNotifyPayload drops mentions from the end of the event's sorted list
-// until its JSON encoding fits in a NOTIFY payload.
-func fitNotifyPayload(event CommentEvent) (CommentEvent, error) {
-	data, err := json.Marshal(event)
-	if err != nil {
-		return event, fmt.Errorf("marshal comment event: %w", err)
-	}
-
-	if len(data) <= maxNotifyPayload {
-		return event, nil
-	}
-
-	bare := event
-	bare.Mentioned = nil
-
-	data, err = json.Marshal(bare)
-	if err != nil {
-		return event, fmt.Errorf("marshal comment event: %w", err)
-	}
-
-	// Room for `,"mentioned":[]` and the entries with their commas.
-	budget := maxNotifyPayload - len(data) - len(`,"mentioned":[]`)
-
-	var kept []string
-
-	for _, m := range event.Mentioned {
-		entry, err := json.Marshal(m)
-		if err != nil {
-			return event, fmt.Errorf("marshal mention: %w", err)
-		}
-
-		cost := len(entry)
-		if len(kept) > 0 {
-			cost++
-		}
-
-		if cost > budget {
-			break
-		}
-
-		kept = append(kept, m)
-		budget -= cost
-	}
-
-	bare.Mentioned = kept
-
-	return bare, nil
 }

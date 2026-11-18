@@ -1,0 +1,17 @@
+{
+  "notifications": [
+    {
+      "key": "core://user/alice",
+      "id": "1",
+      "kind": "se.tt.wires.updated",
+      "document_uuid": "a2000000-0000-4000-8000-000000000001",
+      "document_type": "tt/wire",
+      "actor": "core://user/producer",
+      "event_uuid": "e2000000-0000-4000-8000-000000000001",
+      "created": "2023-01-10T20:06:37+01:00",
+      "meta": {
+        "headline": "Wires updated"
+      }
+    }
+  ]
+}

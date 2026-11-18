@@ -192,11 +192,9 @@ editor ── CreateComment(uuid, thread_uuid, document_uuid, payload) ──►
                           │     missing: INSERT ... ON CONFLICT DO NOTHING, lock again
                           │   INSERT comment ON CONFLICT DO NOTHING             ← retry? answer it
                           │   bump thread updated (reopen if resolved)
-                          │   pg_notify('comment_update', event)
                           │ COMMIT
                           ▼
-              every replica: WaitForComments handlers waiting on the document
-              └─ answer the document uuid; the client re-lists its threads
+              nothing is notified; a client re-lists its threads to see changes
 ```
 
 The weight here is outside the database: every comments RPC but
@@ -312,7 +310,9 @@ this service has not taken.
    migrate` in elephant-platform, or `mage sql:db && mage sql:migrate`
    locally).
 2. Keycloak knows the scopes: `user`, `doc_admin`, `schema_admin`,
-   `schema_read`. Commenting also needs a repository document scope on the
+   `schema_read`, `user_notify`. Grant `user_notify` to the producer clients
+   that ingest notification events, such as elephant-wires, and to nothing
+   else: it is the only scope `Ingest` accepts. Commenting also needs a repository document scope on the
    caller's token, since the repository refuses `GetPermissions` without one:
    a client on client credentials that is to comment, such as an agent, needs
    `doc_read` or a broader document scope as well as `user`.
@@ -610,9 +610,9 @@ unauthenticated and internal only.
 - **Another tab does not see a read-state change until it re-lists.**
   `inbox_state_update` is emitted but nothing delivers it to clients yet;
   that is the notification stream's job.
-- **A comment change between two `WaitForComments` calls is missed.** The
-  wait has no cursor because comments have no log; clients list the threads
-  before the first wait and after every answer. A comment log replaces it.
+- **A comment change reaches no other client.** Comment writes notify
+  nobody and send nothing to the notification feed yet; a client sees
+  another's change only when it re-lists the threads.
 - **No readiness entry for the repository.** An unset or unreachable
   `REPOSITORY_ENDPOINT` shows only in the comments RPCs and
   `elephant_user_permission_lookups_total`.

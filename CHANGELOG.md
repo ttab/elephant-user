@@ -6,6 +6,11 @@ detail. Earlier history is not reconstructed.
 
 ## [v1.11.0] - Unreleased
 
+**Breaking (Comments):** `WaitForComments` is removed from the `Comments`
+service on both stacks, and comment writes no longer send the
+`comment_update` notification. Nothing called it. The `NotificationsService`
+stream replaces it.
+
 **Migrations:**
 
 - `schema/007_notifications.sql` creates the notification feed tables:
@@ -16,6 +21,13 @@ detail. Earlier history is not reconstructed.
 
 Changes:
 
+- New Connect-only service `elephant.user.v1.NotificationsService`, without
+  a Twirp mount: `Subscribe`, `Unsubscribe`, `ListSubscriptions`,
+  `ListNotifications` and `Ingest`. `Stream` answers `unimplemented` for now.
+  Permissions and error codes are in
+  [RPC APIs](docs/architecture.md#rpc-apis).
+- New scope `user_notify`, the only scope that may call `Ingest`; grant it to
+  producer clients.
 - New flags `--subscription-ttl` (`SUBSCRIPTION_TTL`, default `24h`), the
   lifetime of a notification subscription that gives none of its own, and
   `--notification-retention` (`NOTIFICATION_RETENTION`, default `4320h`, 180
@@ -24,6 +36,8 @@ Changes:
 - New metrics `elephant_user_notifications_written_total{family}` and
   `elephant_user_cleaner_deletions_total{item}`; see
   [docs/observability.md](docs/observability.md#notification-feed).
+- Dependency upgrades: elephant-api to v0.30.0, the release carrying the
+  `NotificationsService` and dropping `WaitForComments`.
 
 ## [v1.10.0] - 2026-11-16
 

@@ -54,10 +54,9 @@ customer and does not label by org).
   Long-polls answer `200` on timeout as well as on data, so their volume is
   driven by client count, not by writes.
 - `rpc_duration_seconds{service,method,customer}` — histogram. `PollEventLog`,
-  `PollMessages`, `PollInboxMessages`, `GetActiveConfigGeneration` and
-  `WaitForComments` are long-polls and legitimately sit at their timeouts
-  (30 s; 10 s for `GetActiveConfigGeneration`; the client's `max_wait_sec`,
-  10 s by default and at most 30 s, for `WaitForComments`); read their p50 as
+  `PollMessages`, `PollInboxMessages` and `GetActiveConfigGeneration` are
+  long-polls and legitimately sit at their timeouts (30 s; 10 s for
+  `GetActiveConfigGeneration`); read their p50 as
   "how often something happened", not as latency. Every other method should
   be milliseconds, except that a comments RPC that misses the permission cache
   also waits for the repository.
