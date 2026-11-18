@@ -2,12 +2,9 @@ package internal
 
 import (
 	"encoding/json"
-	"fmt"
 	"slices"
-	"strings"
 	"testing"
 
-	"github.com/google/uuid"
 	"github.com/ttab/elephantine/test"
 )
 
@@ -52,64 +49,6 @@ func TestMentionedSubjects(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected an error for malformed JSON")
 	}
-}
-
-func TestFitNotifyPayload(t *testing.T) {
-	threadUUID := uuid.New()
-
-	event := CommentEvent{
-		Type:         CommentEventCommentCreated,
-		DocumentUUID: uuid.New(),
-		ThreadUUID:   threadUUID,
-		CommentUUID:  &threadUUID,
-		Actor:        "core://user/actor",
-		Kind:         "se.ecms.user.comments.factcheck",
-	}
-
-	for i := range 500 {
-		event.Mentioned = append(event.Mentioned,
-			fmt.Sprintf("core://user/%s-%04d", strings.Repeat("x", 20), i))
-	}
-
-	fitted, err := fitNotifyPayload(event)
-	test.Mustf(t, err, "fit the payload")
-
-	data, err := json.Marshal(fitted)
-	test.Mustf(t, err, "marshal the fitted event")
-
-	if len(data) > maxNotifyPayload {
-		t.Fatalf("fitted payload is %d bytes, over the %d limit",
-			len(data), maxNotifyPayload)
-	}
-
-	n := len(fitted.Mentioned)
-	if n == 0 || n == len(event.Mentioned) {
-		t.Fatalf("kept %d of %d mentions, want a truncated prefix",
-			n, len(event.Mentioned))
-	}
-
-	if !slices.Equal(event.Mentioned[:n], fitted.Mentioned) {
-		t.Fatal("the kept mentions are not a prefix of the sorted list")
-	}
-
-	// One more mention would not have fit.
-	fitted.Mentioned = event.Mentioned[:n+1]
-
-	data, err = json.Marshal(fitted)
-	test.Mustf(t, err, "marshal the event with one more mention")
-
-	if len(data) <= maxNotifyPayload {
-		t.Fatalf("truncated more than needed: %d bytes with one more mention",
-			len(data))
-	}
-
-	small := event
-	small.Mentioned = event.Mentioned[:3]
-
-	same, err := fitNotifyPayload(small)
-	test.Mustf(t, err, "fit a small payload")
-
-	test.Equalf(t, 3, len(same.Mentioned), "a payload that fits is left alone")
 }
 
 func TestSameJSON(t *testing.T) {

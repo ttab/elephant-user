@@ -34,10 +34,6 @@ var ErrNotCommentAuthor = errors.New("not the author of the comment")
 
 // CommentsStore is the storage the Comments handlers need.
 type CommentsStore interface {
-	OnCommentUpdate(
-		ctx context.Context, ch chan CommentEvent,
-		documentUUIDs []uuid.UUID,
-	)
 	GetCommentDocument(
 		ctx context.Context, commentUUID uuid.UUID,
 	) (uuid.UUID, error)
@@ -117,31 +113,4 @@ type Mention struct {
 	Author       string
 	AuthorName   string
 	Created      time.Time
-}
-
-// CommentEventType is the kind of change a CommentEvent announces.
-type CommentEventType string
-
-const (
-	CommentEventThreadCreated  CommentEventType = "thread_created"
-	CommentEventCommentCreated CommentEventType = "comment_created"
-	CommentEventCommentUpdated CommentEventType = "comment_updated"
-	CommentEventCommentDeleted CommentEventType = "comment_deleted"
-	CommentEventThreadResolved CommentEventType = "thread_resolved"
-	CommentEventThreadReopened CommentEventType = "thread_reopened"
-)
-
-// CommentEvent announces a change to a thread or a comment on the
-// comment_update channel. It is a wakeup: readers re-read, and the body is
-// never carried. CommentUUID is nil for thread events, Mentioned is set on
-// comment creates and updates only.
-type CommentEvent struct {
-	Type         CommentEventType `json:"type"`
-	DocumentUUID uuid.UUID        `json:"document_uuid"`
-	ThreadUUID   uuid.UUID        `json:"thread_uuid"`
-	CommentUUID  *uuid.UUID       `json:"comment_uuid,omitempty"`
-	Actor        string           `json:"actor"`
-	Kind         string           `json:"kind"`
-	Mentioned    []string         `json:"mentioned,omitempty"`
-	Time         time.Time        `json:"time"`
 }

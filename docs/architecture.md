@@ -186,8 +186,7 @@ delivered. Two mechanisms, same principle:
   [Inbox messages](#inbox-messages).
 - **Comments have no sequence id.** Threads and comments are keyed by
   client-made uuids, ordered inside a thread by `(created, uuid)` and listed
-  by `updated`. Timestamps are safe for that because nothing tails comments:
-  `WaitForComments` has no cursor and only names the documents that changed.
+  by `updated`. Timestamps are safe for that because nothing tails comments.
   A comment log, when one is added, takes its ids from a `sequence_counter`
   row, last in the writing transaction, never from the timestamps; see
   [ADR-0002](adr/0002-comment-access-follows-the-repository-document.md).
@@ -330,8 +329,7 @@ author's or, with a flag the handler sets from `doc_admin`, anyone's, and
 deleting a deleted comment is a no-op. A delete keeps the row and its
 payload, but no read returns the payload or the mentions of a deleted
 comment. `ResolveThread` and `ReopenThread` lock the thread; resolving a
-resolved thread and reopening an open one change nothing and announce
-nothing. If a comment log is added, its counter is taken last, after the
+resolved thread and reopening an open one change nothing. If a comment log is added, its counter is taken last, after the
 thread lock, as the eventlog rule requires.
 
 `mentioned` is derived in the store from the payload, the `uri` of every
@@ -340,12 +338,8 @@ derived again on every edit; it is never taken from the caller. Its GIN index
 serves `ListMentions`, which answers references to live comments without
 their payload.
 
-Every write emits `pg_notify('comment_update')` inside its transaction with
-the event record `{type, document_uuid, thread_uuid, comment_uuid, actor,
-kind, mentioned, time}`; the first comment on a thread emits
-`thread_created` and `comment_created`, an implicit reopen adds
-`thread_reopened`. The mention list is truncated to keep the payload under
-the 8000 byte NOTIFY limit, which costs nothing since readers re-read.
+Comment and thread writes send no notification: nothing waits on them, and
+no comment events reach the notification feed yet.
 
 The handlers (`internal/comments_service.go`) check access before they
 touch the store: the document a thread is on decides who may read and write
@@ -359,16 +353,6 @@ handler checks that every inline `<mention id>` and `<a id>` in a text block
 is bound to a link in the same block with that id and the matching rel
 (`mention`, `see-also`), which revisor cannot express. Timestamps are RFC3339
 with fractional seconds, since `ListMentions` pages on `created`.
-
-`WaitForComments` is the interim wakeup poll: it registers the requested
-documents on the `Comments` FanOut, waits for the first event or
-`max_wait_sec` (default 10, at most 30), and answers with that document and
-any other whose event had already arrived; it does not linger to collect
-more. It has no cursor, so a change between two calls is not reported, and a
-timeout is an empty answer, so a client lists the threads before its first
-wait. The listener is registered from a goroutine, as `PollEventLog`'s is, so
-a write landing in the first moment of a wait can also be missed. A comment
-log and stream are meant to replace it; neither exists yet.
 
 ### Retention cleaner
 
@@ -392,7 +376,7 @@ elephantine's `docs/joblock-restart-semantics.md`.
 
 ## Real-time plumbing
 
-Eight Postgres NOTIFY channels, one `pg.FanOut` each on `PGStore`, one LISTEN
+Seven Postgres NOTIFY channels, one `pg.FanOut` each on `PGStore`, one LISTEN
 connection per replica (`pg.Subscriber` on the direct pool):
 
 | Channel | Published by | Woken consumers |
@@ -403,7 +387,6 @@ connection per replica (`pg.Subscriber` on the direct pool):
 | `event_log_update` | every eventlog writer | `PollEventLog` handlers whose owner set contains the row's owner |
 | `schema_update` | generation activation | validator reload loop, `GetActiveConfigGeneration` long-polls |
 | `deprecation_update` | `UpdateDeprecation` | validator reload loop |
-| `comment_update` | every comment and thread write | `WaitForComments` handlers waiting on the event's document (`OnCommentUpdate`) |
 | `notification_update` | the feed fan-out, once per key written, payload `{key, id}` | nobody yet |
 
 `pg_notify` is always issued inside the writing transaction; Postgres delivers
@@ -496,7 +479,7 @@ its scope explicitly — an identified caller without the scope gets
 |---|---|---|
 | `Settings` | `GetDocument`, `ListDocuments`, `UpdateDocument`, `DeleteDocument`, `GetProperties`, `SetProperties`, `DeleteProperties`, `PollEventLog` | `user`; writing a document owned by an org or unit also needs `doc_admin` and membership |
 | `Messages` | `PushMessage`, `PollMessages`, `PushInboxMessage`, `PollInboxMessages`, `ListInboxMessages`, `UpdateInboxMessage`, `DeleteInboxMessage` | `user`; `PushInboxMessage` to a unit or org also `doc_admin` + membership |
-| `Comments` | `CreateComment`, `UpdateComment`, `DeleteComment`, `GetThread`, `ListThreads`, `ResolveThread`, `ReopenThread`, `ListMentions`, `WaitForComments` | `user` and a document permission (below); `doc_admin` to delete others' comments |
+| `Comments` | `CreateComment`, `UpdateComment`, `DeleteComment`, `GetThread`, `ListThreads`, `ResolveThread`, `ReopenThread`, `ListMentions` | `user` and a document permission (below); `doc_admin` to delete others' comments |
 | `Configuration` | `RegisterConfigGeneration`, `ActivateConfigGeneration`, `UpdateDeprecation` | `schema_admin` |
 | `Configuration` | `GetActiveConfigGeneration`, `ListConfigGenerations`, `GetSchema`, `GetDeprecations` | `schema_admin` or `schema_read` |
 
@@ -533,7 +516,6 @@ the document the thread is on:
 | `GetThread`, `ListThreads` | read | |
 | `ResolveThread`, `ReopenThread` | write | |
 | `ListMentions` | none | the caller's own mentions only, as references without payloads |
-| `WaitForComments` | read on every requested document | one refused document fails the call |
 
 `doc_admin` affects nothing else here. A document the repository refuses is
 `permission_denied`, one it does not know is `not_found`, and a failed lookup
@@ -543,7 +525,7 @@ is `internal`. The other error codes:
   validation or has an inline id without a matching link; a new thread
   without `document_uuid`; a `document_uuid` other than an existing thread's;
   a non-empty `kind` on `CreateComment` that is not reverse domain notation,
-  on an existing thread too (rule below); more than 100 documents in a wait; a negative `max_wait_sec` or `size`; a malformed `before`.
+  on an existing thread too (rule below); a negative `size`; a malformed `before`.
 
 A thread's `kind` must match
 `^[a-z][a-z0-9-]*(\.[a-z][a-z0-9-]*){2,}$`, the elephant client's plugin id
@@ -568,7 +550,7 @@ differences are pinned by the goldens in `testdata/TestDualStackBodies/`:
   `deadline_exceeded` 408 and 504, `failed_precondition` 412 and 400.
 - Deadlines: a Connect client's `Connect-Timeout-Ms` becomes the handler's
   context deadline. The long polls (`PollEventLog`, `PollMessages`,
-  `PollInboxMessages`, `GetActiveConfigGeneration`, `WaitForComments`) answer
+  `PollInboxMessages`, `GetActiveConfigGeneration`) answer
   `deadline_exceeded` when it runs out and `canceled` when the caller goes
   away (`waitEndedError`). Twirp has no timeout header.
 

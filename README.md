@@ -57,7 +57,7 @@ internal/
   settings_service.go      Settings handlers and the SettingsStore interface they consume
   settings_store.go        PGStore: documents, properties, eventlog
   comments.go              comments feature contract: threads, comments, mentions, events, errors
-  comments_service.go      Comments handlers: document access checks, inline id check, WaitForComments
+  comments_service.go      Comments handlers: document access checks, inline id check
   comments_store.go        PGStore: comment threads, comments, mentions
   config_service.go        Configuration handlers
   config.go                config feature contract: types, events, errors
@@ -210,13 +210,12 @@ the `/twirp/` mount, waits for the next major release and for
 `rpc_protocol_responses_total{protocol="twirp"}` to reach zero.
 
 **Notifications over a websocket.** The long-poll transports (`PollMessages`,
-`PollInboxMessages`, `PollEventLog`, `WaitForComments`) are meant to be
+`PollInboxMessages`, `PollEventLog`) are meant to be
 replaced by a websocket subscription API with an ingest endpoint for producers
 such as elephant-wires. The routing model is not decided; the `Messages` RPC
 shapes are frozen until that exists.
 
-**A comment log.** Comments have no commit-ordered id and no change log, so
-`WaitForComments` can only say which documents changed, and a change between
-two waits is missed; clients list the threads before the first wait. The
-`comment_update` notification already carries the record a log row would
-hold. Mentions are stored but not delivered to the mentioned subject.
+**Comment notifications.** Comment writes notify nobody: comments have no
+commit-ordered id and no change log, and no comment events reach the
+notification feed yet, so a client re-lists the threads to see changes.
+Mentions are stored but not delivered to the mentioned subject.

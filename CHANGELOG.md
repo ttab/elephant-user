@@ -6,6 +6,11 @@ detail. Earlier history is not reconstructed.
 
 ## [v1.11.0] - Unreleased
 
+**Breaking (Comments):** `WaitForComments` is removed from the `Comments`
+service on both stacks, and comment writes no longer send the
+`comment_update` notification. Nothing called it. The `NotificationsService`
+stream replaces it.
+
 **Migrations:**
 
 - `schema/007_notifications.sql` creates the notification feed tables:
@@ -24,6 +29,8 @@ Changes:
 - New metrics `elephant_user_notifications_written_total{family}` and
   `elephant_user_cleaner_deletions_total{item}`; see
   [docs/observability.md](docs/observability.md#notification-feed).
+- Dependency upgrades: elephant-api to v0.30.0, the release carrying the
+  `NotificationsService` and dropping `WaitForComments`.
 
 ## [v1.10.0] - 2026-11-16
 

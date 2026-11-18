@@ -160,13 +160,6 @@ the answer for 30 s, and gates every thread on it. Not a scope, and not an
 ACL kept here.
 _Avoid_: Thread ACL, comment scope
 
-**Wakeup poll**:
-A long poll with no cursor that answers which documents changed, never what
-changed: `WaitForComments`. The caller re-reads, and a change between two
-calls is not reported. Not a cursor poll like `PollEventLog`, and not a
-comment stream, which does not exist yet.
-_Avoid_: Subscription, comment feed
-
 ### Ids and streams
 
 **Commit-ordered id**:

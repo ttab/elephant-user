@@ -613,12 +613,6 @@ func TestCommentsService(t *testing.T) {
 			&user.ListThreadsRequest{DocumentUuid: docRefused})
 		test.IsRPCError(t, err, connect.CodePermissionDenied)
 
-		_, err = eu.Comments.WaitForComments(aliceCtx, &user.WaitForCommentsRequest{
-			DocumentUuids: []string{docReadOnly, docRefused},
-			MaxWaitSec:    1,
-		})
-		test.IsRPCError(t, err, connect.CodePermissionDenied)
-
 		thread := getThread(aliceCtx, threadReadOnly)
 		test.Equalf(t, 1, len(thread.Comments), "read where alice may read")
 
@@ -739,111 +733,6 @@ func TestCommentsMentions(t *testing.T) {
 		Before: "yesterday",
 	})
 	test.IsRPCError(t, err, connect.CodeInvalidArgument)
-}
-
-// TestWaitForComments covers the interim wakeup poll: it answers with the
-// document that had a change, times out empty, and refuses requests over
-// its limits.
-func TestWaitForComments(t *testing.T) {
-	eu := startElephantUser(t)
-	ctx := t.Context()
-
-	const (
-		docA = "a0000000-0000-4000-8000-000000000001"
-		docB = "a0000000-0000-4000-8000-000000000002"
-		docC = "a0000000-0000-4000-8000-000000000003"
-	)
-
-	aliceCtx := bearerContext(ctx, eu.AccessToken(t,
-		commentClaims("alice", "user", "Alice Andersson")))
-
-	t.Run("wakes on a post", func(t *testing.T) {
-		type result struct {
-			res *user.WaitForCommentsResponse
-			err error
-		}
-
-		done := make(chan result, 1)
-
-		go func() {
-			res, err := eu.Comments.WaitForComments(aliceCtx,
-				&user.WaitForCommentsRequest{
-					DocumentUuids: []string{docA, docB, docA},
-					MaxWaitSec:    10,
-				})
-
-			done <- result{res: res, err: err}
-		}()
-
-		// Let the wait register before the post.
-		time.Sleep(50 * time.Millisecond)
-
-		started := time.Now()
-
-		_, err := eu.Comments.CreateComment(aliceCtx, &user.CreateCommentRequest{
-			Uuid:         "c0000000-0000-4000-8000-000000000001",
-			ThreadUuid:   "b0000000-0000-4000-8000-000000000001",
-			DocumentUuid: docB,
-			Payload:      rpcCommentPayload("Wake up."),
-		})
-		test.Mustf(t, err, "post to a waited-for document")
-
-		// Let the wait answer before anything else happens.
-		time.Sleep(50 * time.Millisecond)
-
-		r := <-done
-		test.Mustf(t, r.err, "wait for comments")
-
-		expectStrings(t, []string{docB}, r.res.DocumentUuids,
-			"answer with the document that changed")
-
-		if time.Since(started) > 5*time.Second {
-			t.Fatal("the wait ran to its timeout instead of waking")
-		}
-	})
-
-	t.Run("times out empty", func(t *testing.T) {
-		started := time.Now()
-
-		res, err := eu.Comments.WaitForComments(aliceCtx,
-			&user.WaitForCommentsRequest{
-				DocumentUuids: []string{docC},
-				MaxWaitSec:    1,
-			})
-		test.Mustf(t, err, "wait without changes")
-
-		test.Equalf(t, 0, len(res.DocumentUuids), "nothing changed")
-
-		if time.Since(started) < time.Second {
-			t.Fatal("answered before the wait ran out")
-		}
-	})
-
-	t.Run("limits", func(t *testing.T) {
-		many := make([]string, 101)
-		for i := range many {
-			many[i] = fmt.Sprintf("a0000000-0000-4000-8000-%012d", i)
-		}
-
-		_, err := eu.Comments.WaitForComments(aliceCtx,
-			&user.WaitForCommentsRequest{DocumentUuids: many})
-		test.IsRPCError(t, err, connect.CodeInvalidArgument)
-
-		_, err = eu.Comments.WaitForComments(aliceCtx,
-			&user.WaitForCommentsRequest{
-				DocumentUuids: []string{docA},
-				MaxWaitSec:    -1,
-			})
-		test.IsRPCError(t, err, connect.CodeInvalidArgument)
-
-		_, err = eu.Comments.WaitForComments(aliceCtx,
-			&user.WaitForCommentsRequest{})
-		test.IsRPCError(t, err, connect.CodeInvalidArgument)
-
-		_, err = eu.Comments.WaitForComments(aliceCtx,
-			&user.WaitForCommentsRequest{DocumentUuids: []string{"nope"}})
-		test.IsRPCError(t, err, connect.CodeInvalidArgument)
-	})
 }
 
 // TestCommentsUnauthenticated checks that a call without a token is

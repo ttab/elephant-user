@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"slices"
 	"strings"
 	"time"
 
@@ -16,17 +15,6 @@ import (
 	"github.com/ttab/elephantine/rpc"
 	"github.com/ttab/newsdoc"
 	"golang.org/x/net/html"
-)
-
-const (
-	// waitDefaultSeconds is how long WaitForComments waits when the
-	// request does not say.
-	waitDefaultSeconds = 10
-	// waitMaxSeconds caps how long WaitForComments waits.
-	waitMaxSeconds = 30
-	// waitMaxDocuments is how many documents one WaitForComments call may
-	// wait for.
-	waitMaxDocuments = 100
 )
 
 // CommentsService implements the Comments RPCs. Every RPC needs the user
@@ -645,102 +633,6 @@ func (s *CommentsService) ListMentions(
 	}
 
 	return &res, nil
-}
-
-// WaitForComments implements [user.Comments]. It answers on the first
-// change to any of the documents, with that document and any other whose
-// event had already arrived by then; it does not linger to collect more.
-// The event is a wakeup only: nothing but its document uuid is used.
-func (s *CommentsService) WaitForComments(
-	ctx context.Context, req *user.WaitForCommentsRequest,
-) (*user.WaitForCommentsResponse, error) {
-	_, err := rpc.RequireAnyScope(ctx, ScopeUser)
-	if err != nil {
-		return nil, err
-	}
-
-	if len(req.DocumentUuids) == 0 {
-		return nil, rpc.RequiredArgument("document_uuids")
-	}
-
-	if len(req.DocumentUuids) > waitMaxDocuments {
-		return nil, rpc.InvalidArgumentf("document_uuids",
-			"at most %d documents, got %d",
-			waitMaxDocuments, len(req.DocumentUuids))
-	}
-
-	if req.MaxWaitSec < 0 {
-		return nil, rpc.InvalidArgument("max_wait_sec", "cannot be negative")
-	}
-
-	maxWait := req.MaxWaitSec
-	if maxWait == 0 {
-		maxWait = waitDefaultSeconds
-	}
-
-	maxWait = min(maxWait, waitMaxSeconds)
-
-	documents := make([]uuid.UUID, 0, len(req.DocumentUuids))
-
-	for i, raw := range req.DocumentUuids {
-		id, err := parseUUID(fmt.Sprintf("document_uuids.%d", i), raw)
-		if err != nil {
-			return nil, err
-		}
-
-		if slices.Contains(documents, id) {
-			continue
-		}
-
-		documents = append(documents, id)
-	}
-
-	for _, id := range documents {
-		err := s.requireDocumentAccess(ctx, id, accessRead)
-		if err != nil {
-			return nil, err
-		}
-	}
-
-	waitCtx, cancel := context.WithCancel(ctx)
-	defer cancel()
-
-	// Delivery is a non-blocking send, so the buffer is what keeps the
-	// events that arrive while the first one is being handled. One write
-	// emits up to two events for its document.
-	events := make(chan CommentEvent, 4*len(documents))
-
-	s.store.OnCommentUpdate(waitCtx, events, documents)
-
-	timer := time.NewTimer(time.Duration(maxWait) * time.Second)
-	defer timer.Stop()
-
-	var first CommentEvent
-
-	select {
-	case first = <-events:
-	case <-timer.C:
-		return &user.WaitForCommentsResponse{}, nil
-	case <-ctx.Done():
-		return nil, waitEndedError(ctx)
-	}
-
-	changed := []string{first.DocumentUUID.String()}
-
-drain:
-	for {
-		select {
-		case e := <-events:
-			id := e.DocumentUUID.String()
-			if !slices.Contains(changed, id) {
-				changed = append(changed, id)
-			}
-		default:
-			break drain
-		}
-	}
-
-	return &user.WaitForCommentsResponse{DocumentUuids: changed}, nil
 }
 
 // formatCommentTime formats a comment timestamp as RFC3339 with its
