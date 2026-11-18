@@ -19,6 +19,7 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/ttab/elephant-api/elephant/user/v1/userv1connect"
 	"github.com/ttab/elephant-api/newsdoc"
 	"github.com/ttab/elephant-api/user"
 	"github.com/ttab/elephant-api/user/userconnect"
@@ -391,6 +392,9 @@ type TestElephantUser struct {
 	Settings      user.Settings
 	Configuration user.Configuration
 	Comments      user.Comments
+	// Notifications is a Connect client whatever the stack: the service
+	// has no Twirp mount.
+	Notifications userv1connect.NotificationsServiceClient
 	// Repository is the stand-in for elephant-repository that answers
 	// the comments service's permission lookups.
 	Repository *repositoryStub
@@ -573,6 +577,8 @@ func startElephantUser(t *testing.T) TestElephantUser {
 
 	commentsService := internal.NewCommentsService(
 		store, validator, documentPermissions)
+	notificationsService := internal.NewNotificationsService(
+		logger, store, documentPermissions)
 
 	err = internal.Run(ctx, internal.Parameters{
 		Logger:               logger,
@@ -583,6 +589,7 @@ func startElephantUser(t *testing.T) TestElephantUser {
 		SettingsService:      settingsService,
 		ConfigurationService: configurationService,
 		CommentsService:      commentsService,
+		NotificationsService: notificationsService,
 	})
 	test.Mustf(t, err, "run application")
 
@@ -591,12 +598,18 @@ func startElephantUser(t *testing.T) TestElephantUser {
 
 	clients := newClients(stack, client, baseURL)
 
+	// The notifications service is Connect only, so its client is the
+	// same on both stacks.
+	notifications := userv1connect.NewNotificationsServiceClient(
+		client, baseURL, connect.WithInterceptors(rpc.PropagateHeaders()))
+
 	return TestElephantUser{
 		JWTKey:        jwtKey,
 		Messages:      clients.Messages,
 		Settings:      clients.Settings,
 		Configuration: clients.Configuration,
 		Comments:      clients.Comments,
+		Notifications: notifications,
 		Repository:    repository,
 		Stack:         stack,
 		Client:        client,

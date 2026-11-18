@@ -9,6 +9,7 @@ import (
 	"strconv"
 
 	"connectrpc.com/connect"
+	"github.com/google/uuid"
 	newsdoc_rpc "github.com/ttab/elephant-api/newsdoc"
 	"github.com/ttab/elephant-user/postgres"
 	"github.com/ttab/elephantine/rpc"
@@ -35,6 +36,20 @@ func checkReverseDomainNotation(name string) error {
 	}
 
 	return nil
+}
+
+// parseUUID parses a required uuid argument.
+func parseUUID(argument string, value string) (uuid.UUID, error) {
+	if value == "" {
+		return uuid.Nil, rpc.RequiredArgument(argument)
+	}
+
+	id, err := uuid.Parse(value)
+	if err != nil {
+		return uuid.Nil, rpc.InvalidArgument(argument, err.Error())
+	}
+
+	return id, nil
 }
 
 // waitEndedError maps the end of a long-poll wait to the RPC code the

@@ -1,0 +1,15 @@
+{
+  "body": {
+    "subscriptions": [
+      {
+        "documentUuid": "a5000000-0000-4000-8000-000000000001",
+        "user": "core://user/tester"
+      },
+      {
+        "documentUuid": "a5000000-0000-4000-8000-000000000002",
+        "user": "core://user/tester"
+      }
+    ]
+  },
+  "status": 200
+}

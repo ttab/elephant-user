@@ -21,6 +21,13 @@ stream replaces it.
 
 Changes:
 
+- New Connect-only service `elephant.user.v1.NotificationsService`, without
+  a Twirp mount: `Subscribe`, `Unsubscribe`, `ListSubscriptions`,
+  `ListNotifications` and `Ingest`. `Stream` answers `unimplemented` for now.
+  Permissions and error codes are in
+  [RPC APIs](docs/architecture.md#rpc-apis).
+- New scope `user_notify`, the only scope that may call `Ingest`; grant it to
+  producer clients.
 - New flags `--subscription-ttl` (`SUBSCRIPTION_TTL`, default `24h`), the
   lifetime of a notification subscription that gives none of its own, and
   `--notification-retention` (`NOTIFICATION_RETENTION`, default `4320h`, 180

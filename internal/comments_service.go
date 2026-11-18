@@ -40,57 +40,12 @@ func NewCommentsService(
 // Interface guard.
 var _ user.Comments = &CommentsService{}
 
-// documentAccess is the permission a handler needs on a document.
-type documentAccess string
-
-const (
-	accessRead  documentAccess = "read"
-	accessWrite documentAccess = "write"
-)
-
-// requireDocumentAccess checks that the caller has the access on the
-// document: permission_denied when the repository does not grant it,
-// not_found for a document the repository does not know.
+// requireDocumentAccess checks the caller's access to the document through
+// the service's permissions lookup.
 func (s *CommentsService) requireDocumentAccess(
 	ctx context.Context, documentUUID uuid.UUID, access documentAccess,
 ) error {
-	set, err := s.permissions.Permissions(ctx, documentUUID.String())
-	if errors.Is(err, ErrDocumentNotFound) {
-		return rpc.NotFound(fmt.Sprintf(
-			"no such document %s", documentUUID))
-	}
-
-	if err != nil {
-		return rpc.Internalf(
-			"check %s permission on document %s: %w",
-			access, documentUUID, err)
-	}
-
-	granted := set.Read
-	if access == accessWrite {
-		granted = set.Write
-	}
-
-	if !granted {
-		return rpc.PermissionDeniedf(
-			"no %s permission on document %s", access, documentUUID)
-	}
-
-	return nil
-}
-
-// parseUUID parses a required uuid argument.
-func parseUUID(argument string, value string) (uuid.UUID, error) {
-	if value == "" {
-		return uuid.Nil, rpc.RequiredArgument(argument)
-	}
-
-	id, err := uuid.Parse(value)
-	if err != nil {
-		return uuid.Nil, rpc.InvalidArgument(argument, err.Error())
-	}
-
-	return id, nil
+	return requireDocumentAccess(ctx, s.permissions, documentUUID, access)
 }
 
 // validateCommentPayload validates a comment body against the comments

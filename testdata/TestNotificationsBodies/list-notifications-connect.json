@@ -1,0 +1,29 @@
+{
+  "body": {
+    "notifications": [
+      {
+        "actor": "core://user/producer",
+        "documentType": "core/article",
+        "documentUuid": "a5000000-0000-4000-8000-000000000001",
+        "eventUuid": "e5000000-0000-4000-8000-000000000001",
+        "id": "1",
+        "key": "core://user/tester",
+        "kind": "se.ecms.user.comments.created",
+        "meta": {
+          "excerpt": "Ask Anna."
+        },
+        "refs": [
+          {
+            "rel": "thread",
+            "uuid": "b5000000-0000-4000-8000-000000000001"
+          },
+          {
+            "rel": "comment",
+            "uuid": "c5000000-0000-4000-8000-000000000001"
+          }
+        ]
+      }
+    ]
+  },
+  "status": 200
+}
