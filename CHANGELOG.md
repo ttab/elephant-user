@@ -47,7 +47,10 @@ Changes:
   [docs/observability.md](docs/observability.md#notification-feed).
 - New metrics `elephant_user_stream_notifications_sent_total{reason}`,
   `elephant_user_stream_keepalives_total` and
-  `elephant_user_stream_wakeups_dropped_total`.
+  `elephant_user_stream_wakeups_dropped_total`; see
+  [docs/observability.md](docs/observability.md#notification-feed). The first
+  stage rollout of the stream should be watched from a browser; see
+  [long-lived connections](docs/ops.md#long-lived-connections).
 - Dependency upgrades: elephant-api to v0.30.0, the release carrying the
   `NotificationsService` and dropping `WaitForComments`.
 

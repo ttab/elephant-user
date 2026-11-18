@@ -13,7 +13,8 @@ over Twirp and Connect as four services: `Settings`, `Messages`, `Comments` and
 `Configuration`. A fifth, `NotificationsService`, is Connect only: users
 subscribe to documents (`Subscribe`, `Unsubscribe`, `ListSubscriptions`),
 producers record events with `Ingest` under the `user_notify` scope, and a
-user lists the rows under its sub, org and units with `ListNotifications`.
+user lists the rows under its sub, org and units with `ListNotifications` and
+receives them as they are written on one long-lived `Stream`.
 
 Two things make it more than a CRUD service. Settings documents can be owned by
 an organisation or a unit as well as a user, so a filter set can be shared
@@ -64,6 +65,7 @@ internal/
   comments_store.go        PGStore: comment threads, comments, mentions
   notifications.go         notification feed contract: rows, references, subscriptions, events
   notifications_service.go NotificationsService handlers and the NotificationsStore interface they consume
+  notifications_stream.go  the Stream handler: replay, live rows from its own fan-out listener, keepalive
   notifications_store.go   PGStore: feed fan-out, subscriptions, cursors
   config_service.go        Configuration handlers
   config.go                config feature contract: types, events, errors
@@ -200,6 +202,9 @@ Provided by elephantine's `AuthenticationCLIFlags`.
 | Flag | Env | Default | What it does |
 |---|---|---|---|
 | `--subscription-ttl` | `SUBSCRIPTION_TTL` | `24h` | How long a notification subscription lives when the subscriber gives no TTL, until time or permanent flag of its own. Subscribing again refreshes it. |
+| `--stream-keepalive` | `STREAM_KEEPALIVE` | `20s` | How long a notification stream stays quiet before the server sends a keepalive. Keep it under the ingress idle timeout, 60 s on the ALB. |
+| `--stream-replay-default` | `STREAM_REPLAY_DEFAULT` | `24h` | The replay window of a `Stream` request whose `replay_window_seconds` is 0. |
+| `--stream-replay-max` | `STREAM_REPLAY_MAX` | `168h` (7 days) | The longest replay window a `Stream` request may ask for; a longer one gets this. |
 
 ### Background work
 
@@ -217,9 +222,8 @@ the `/twirp/` mount, waits for the next major release and for
 
 **The notification stream.** The long-poll transports (`PollMessages`,
 `PollInboxMessages`, `PollEventLog`) are meant to be replaced by
-`NotificationsService.Stream`, which answers `unimplemented` until it lands.
-Subscriptions, `Ingest` and `ListNotifications` are served; the `Messages` RPC
-shapes are frozen until the stream exists.
+`NotificationsService.Stream`, which is served; the `Messages` RPC shapes stay
+frozen until the clients have moved to it.
 
 **Comment notifications.** Comment writes notify nobody: comments have no
 commit-ordered id and no change log, and no comment events reach the
