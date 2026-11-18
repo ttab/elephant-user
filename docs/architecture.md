@@ -461,13 +461,18 @@ service never seeds itself.
 
 ## RPC APIs
 
-Every RPC is served on two paths from the same handler, defined in
-`github.com/ttab/elephant-api/user`:
+Every RPC of the four services defined in `github.com/ttab/elephant-api/user`
+is served on two paths from the same handler:
 
 - Twirp: `POST /twirp/elephant.user.<Service>/<Method>`, protobuf or JSON.
 - Connect: `POST /elephant.user.<Service>/<Method>`, protobuf or JSON, and
   gRPC over HTTP/2 on the same path. Adapters in
   `elephant-api/user/userconnect`.
+
+`NotificationsService`, defined in `github.com/ttab/elephant-api/elephant/user/v1`,
+is Connect only: `POST /elephant.user.v1.NotificationsService/<Method>`, with
+no Twirp mount (`internal/notifications_service.go`). Its `Stream` is not
+served yet and answers `unimplemented`.
 
 Every request carries a bearer JWT; authentication is HTTP middleware in front of every handler, and a
 missing or invalid token is `unauthenticated` (401). Each handler then checks
@@ -482,6 +487,8 @@ its scope explicitly — an identified caller without the scope gets
 | `Comments` | `CreateComment`, `UpdateComment`, `DeleteComment`, `GetThread`, `ListThreads`, `ResolveThread`, `ReopenThread`, `ListMentions` | `user` and a document permission (below); `doc_admin` to delete others' comments |
 | `Configuration` | `RegisterConfigGeneration`, `ActivateConfigGeneration`, `UpdateDeprecation` | `schema_admin` |
 | `Configuration` | `GetActiveConfigGeneration`, `ListConfigGenerations`, `GetSchema`, `GetDeprecations` | `schema_admin` or `schema_read` |
+| `NotificationsService` | `Subscribe`, `Unsubscribe`, `ListSubscriptions`, `ListNotifications` | `user`; another user's subscriptions need more (below) |
+| `NotificationsService` | `Ingest` | `user_notify`, and no other scope will do |
 
 Identity comes from the token only: `sub` is the user, `org` a single
 organisation URI, `units` a list of unit URIs, all in the `core://user/…`,
@@ -537,6 +544,50 @@ own.
   one without `doc_admin`.
 - `already_exists`: a comment uuid reused with another thread or payload.
 - `failed_precondition`: an edit of a deleted comment.
+
+The `NotificationsService` RPCs and what they need beyond the scope:
+
+| RPC | Needs | Answers |
+|---|---|---|
+| `Subscribe` | for another user, write on every document in the request | the subscriptions as stored |
+| `Unsubscribe` | for another user, write on every document in the request | nothing |
+| `ListSubscriptions` | for another user, `doc_admin` | the user's live subscriptions |
+| `ListNotifications` | nothing | rows under the caller's sub, org and units, newest first |
+| `Ingest` | nothing | nothing, so a producer never learns who was subscribed |
+
+An empty `user` is the caller; another user is a user uri in any of the three
+forms a token's `sub` can take, the ones the comments schema accepts for a
+mention: `core://user/…`, `core://application/…` for a client on client
+credentials, or `keycloak://user/…`, which elephantine passes through as is.
+The
+document permission is asked of the repository as for comments, and one
+refusal fails the whole call with `permission_denied` before anything is
+written; an unknown document is `not_found`. A subscription item's lifetime is
+a positive `ttl_seconds`, an `until` in the future, `permanent`, or none for
+`SUBSCRIPTION_TTL`; `expires` is RFC3339 with fractional seconds, empty for a
+permanent subscription. `ListNotifications` takes `limit` 0 as 50 and caps it
+at 200, and pages on `created` alone: the next page is the rows created
+strictly before the last row's `created`, so a page that ends inside a group
+of rows sharing one timestamp, one event under several of the caller's keys,
+skips the rest of the group. The stream is what replays exactly. `Ingest`
+without `recipient` writes a row under every live subscriber of the document,
+and nothing when there is none; with one it writes under that key only. An
+empty `actor` is the caller. A repeated `event_uuid` writes nothing new under a
+key that already has it.
+
+- `invalid_argument`: a missing or malformed uuid (`items.N.document_uuid`,
+  `document_uuids.N`, `document_uuid`, `event_uuid`, `refs.N.uuid`); an empty
+  `items` or `document_uuids`; a `user` that is not a `core://user/`,
+  `core://application/` or `keycloak://user/` uri with an id; a
+  `ttl_seconds` that is not positive; an `until` that is malformed or not in
+  the future; a negative `limit`; a malformed `before`; a missing `kind`, or one
+  that is not reverse domain notation; a `recipient` that is not a user uri in
+  one of those three forms, a `core://unit/` or a `core://org/` uri; a ref
+  without `rel`.
+- `permission_denied`: a missing scope; another user's subscriptions without
+  the document permission or `doc_admin`.
+- `not_found`: a document the repository does not know, for another user's
+  subscriptions.
 
 The two stacks answer the same call differently on the wire, and the
 differences are pinned by the goldens in `testdata/TestDualStackBodies/`:

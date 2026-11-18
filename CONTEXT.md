@@ -15,16 +15,17 @@ so.
 ### Identity
 
 **Owner**:
-A URI that settings state and inbox messages are addressed to: a user
-(`core://user/<id>`), a unit (`core://unit/<id>`) or an org
-(`core://org/<id>`). A caller's owners are the `sub`, `org` and `units`
+A URI that settings state and inbox messages are addressed to: a user (a
+subject URI), a unit (`core://unit/<id>`) or an org (`core://org/<id>`). A caller's owners are the `sub`, `org` and `units`
 claims of their token, and nothing else.
 _Avoid_: Target, principal, account
 
 **Subject**:
-The caller themselves, the `sub` claim as elephantine normalises it to a URI.
-A subject is one of the caller's owners; it is the one their read state is
-kept under.
+The caller themselves, the `sub` claim as elephantine normalises it to a URI,
+in one of three forms: `core://user/<id>` for a bare `sub`,
+`keycloak://user/<id>` when the `sub` already is a URI and is kept as is, and
+`core://application/<client>` for a client-credentials token. A subject is one
+of the caller's owners; it is the one their read state is kept under.
 _Avoid_: User id, current user
 
 **Recipient**:

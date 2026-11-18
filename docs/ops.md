@@ -310,7 +310,9 @@ this service has not taken.
    migrate` in elephant-platform, or `mage sql:db && mage sql:migrate`
    locally).
 2. Keycloak knows the scopes: `user`, `doc_admin`, `schema_admin`,
-   `schema_read`. Commenting also needs a repository document scope on the
+   `schema_read`, `user_notify`. Grant `user_notify` to the producer clients
+   that ingest notification events, such as elephant-wires, and to nothing
+   else: it is the only scope `Ingest` accepts. Commenting also needs a repository document scope on the
    caller's token, since the repository refuses `GetPermissions` without one:
    a client on client credentials that is to comment, such as an agent, needs
    `doc_read` or a broader document scope as well as `user`.

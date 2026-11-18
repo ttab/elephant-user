@@ -10,7 +10,10 @@ notifications such as error toasts) and **comments** (threads of comments on
 repository documents, with access decided by the caller's permissions on the
 document in elephant-repository). Everything lives in Postgres and is served
 over Twirp and Connect as four services: `Settings`, `Messages`, `Comments` and
-`Configuration`.
+`Configuration`. A fifth, `NotificationsService`, is Connect only: users
+subscribe to documents (`Subscribe`, `Unsubscribe`, `ListSubscriptions`),
+producers record events with `Ingest` under the `user_notify` scope, and a
+user lists the rows under its sub, org and units with `ListNotifications`.
 
 Two things make it more than a CRUD service. Settings documents can be owned by
 an organisation or a unit as well as a user, so a filter set can be shared
@@ -48,8 +51,8 @@ and `#anchor` resolves. The lint workflow runs it.
 ```
 cmd/user/                  the service binary: flags, pools, wiring
 internal/
-  access.go                scopes and owner checks shared by the handlers
-  handlers.go              helpers shared by the handlers: validation errors, payload decoding, poll wait errors
+  access.go                scopes, owner checks and subject, unit and org uri shapes shared by the handlers
+  handlers.go              helpers shared by the handlers: uuid arguments, validation errors, payload decoding, poll wait errors
   messages.go              messages feature contract: types and events
   messages_service.go      Messages handlers and the MessagesStore interface they consume
   messages_store.go        PGStore: messages and inbox
@@ -59,6 +62,9 @@ internal/
   comments.go              comments feature contract: threads, comments, mentions, events, errors
   comments_service.go      Comments handlers: document access checks, inline id check
   comments_store.go        PGStore: comment threads, comments, mentions
+  notifications.go         notification feed contract: rows, references, subscriptions, events
+  notifications_service.go NotificationsService handlers and the NotificationsStore interface they consume
+  notifications_store.go   PGStore: feed fan-out, subscriptions, cursors
   config_service.go        Configuration handlers
   config.go                config feature contract: types, events, errors
   store.go                 PGStore core: notify channels, subscriber, cleaner
@@ -180,7 +186,7 @@ Provided by elephantine's `AuthenticationCLIFlags`.
 |---|---|---|
 | `--oidc-config` | `OIDC_CONFIG` | OIDC discovery URL. Fetched at startup for the issuer and JWKS; startup fails without it. |
 | `--jwt-audience` | `JWT_AUDIENCE` | Required `aud` claim, if the provider sets one. |
-| `--jwt-scope-prefix` | `JWT_SCOPE_PREFIX` | Prefix stripped from scope values before matching `user`, `doc_admin`, `schema_admin`, `schema_read`. |
+| `--jwt-scope-prefix` | `JWT_SCOPE_PREFIX` | Prefix stripped from scope values before matching `user`, `doc_admin`, `schema_admin`, `schema_read`, `user_notify`. |
 | `--client-id`, `--client-secret` | `CLIENT_ID`, `CLIENT_SECRET` | Confidential client credentials for providers that require them to read the discovery document. |
 
 ### Repository
@@ -209,11 +215,11 @@ error vocabulary. Step 3 of elephantine's `docs/migration-service.md`, dropping
 the `/twirp/` mount, waits for the next major release and for
 `rpc_protocol_responses_total{protocol="twirp"}` to reach zero.
 
-**Notifications over a websocket.** The long-poll transports (`PollMessages`,
-`PollInboxMessages`, `PollEventLog`) are meant to be
-replaced by a websocket subscription API with an ingest endpoint for producers
-such as elephant-wires. The routing model is not decided; the `Messages` RPC
-shapes are frozen until that exists.
+**The notification stream.** The long-poll transports (`PollMessages`,
+`PollInboxMessages`, `PollEventLog`) are meant to be replaced by
+`NotificationsService.Stream`, which answers `unimplemented` until it lands.
+Subscriptions, `Ingest` and `ListNotifications` are served; the `Messages` RPC
+shapes are frozen until the stream exists.
 
 **Comment notifications.** Comment writes notify nobody: comments have no
 commit-ordered id and no change log, and no comment events reach the
