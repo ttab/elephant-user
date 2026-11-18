@@ -25,6 +25,12 @@ type Parameters struct {
 	CommentsService      *CommentsService
 	NotificationsService *NotificationsService
 
+	// TestServerStarted, when set, is called by the server task once a
+	// test server has installed its handler, which is when its
+	// ListenAndServe returns. Tests wait for it before the first request;
+	// a production server never calls it.
+	TestServerStarted func()
+
 	// Subscriber is the pg LISTEN subscriber to run alongside the
 	// server. Optional; tests run their own.
 	Subscriber *pg.Subscriber
@@ -104,7 +110,24 @@ func Run(ctx context.Context, p Parameters) error {
 	// their clean exit must not cancel the group, or the server would be
 	// shut down at stop time and the drain window lost.
 	grp.Required("server", func(ctx context.Context) error {
-		return p.APIServer.ListenAndServe(grace.CancelOnQuit(ctx))
+		serveCtx := grace.CancelOnQuit(ctx)
+
+		err := p.APIServer.ListenAndServe(serveCtx)
+		if err != nil {
+			return fmt.Errorf("serve the API: %w", err)
+		}
+
+		// A test server returns at once with its handler installed. Hold
+		// the task until shutdown regardless: its return cancels the
+		// group, and the server's context with it, which starts the
+		// stream drain and would end every stream as it opened.
+		if serveCtx.Err() == nil && p.TestServerStarted != nil {
+			p.TestServerStarted()
+		}
+
+		<-serveCtx.Done()
+
+		return nil
 	})
 
 	if p.Subscriber != nil {

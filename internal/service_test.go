@@ -411,6 +411,11 @@ type TestElephantUser struct {
 	// DB is the test database, for tests that hold locks or inspect
 	// rows behind the store's back.
 	DB *pgxpool.Pool
+	// StopApplication cancels the context the application runs with,
+	// the way a deploy's SIGTERM ends it: open streams are drained while
+	// the test server keeps its connections. The cleanup still waits
+	// for the application to stop.
+	StopApplication context.CancelFunc
 }
 
 // rpcStack is the protocol stack the test clients are built for. Both
@@ -509,7 +514,12 @@ func (teu *TestElephantUser) AccessToken(t *testing.T, claims elephantine.JWTCla
 	return ss
 }
 
-func startElephantUser(t *testing.T) TestElephantUser {
+// startElephantUser starts the service against a fresh database. The
+// options configure the notifications service, such as a short stream
+// keepalive.
+func startElephantUser(
+	t *testing.T, opts ...internal.NotificationsServiceOption,
+) TestElephantUser {
 	t.Helper()
 
 	ctx := t.Context()
@@ -578,23 +588,62 @@ func startElephantUser(t *testing.T) TestElephantUser {
 	commentsService := internal.NewCommentsService(
 		store, validator, documentPermissions)
 	notificationsService := internal.NewNotificationsService(
-		logger, store, documentPermissions)
+		logger, store, store.Notifications, documentPermissions, metrics,
+		opts...)
 
-	err = internal.Run(ctx, internal.Parameters{
-		Logger:               logger,
-		APIServer:            apiServer,
-		AuthInfoParser:       auth,
-		Registerer:           reg,
-		MessagesService:      messagesService,
-		SettingsService:      settingsService,
-		ConfigurationService: configurationService,
-		CommentsService:      commentsService,
-		NotificationsService: notificationsService,
+	// Run blocks until the test ends, as it does in production: its
+	// return would start the stream drain. Its context is the test's
+	// unless the test stops the application first.
+	appCtx, stopApplication := context.WithCancel(ctx)
+
+	runErr := make(chan error, 1)
+	started := make(chan struct{})
+
+	go func() {
+		runErr <- internal.Run(appCtx, internal.Parameters{
+			Logger:               logger,
+			APIServer:            apiServer,
+			AuthInfoParser:       auth,
+			Registerer:           reg,
+			MessagesService:      messagesService,
+			SettingsService:      settingsService,
+			ConfigurationService: configurationService,
+			CommentsService:      commentsService,
+			NotificationsService: notificationsService,
+			TestServerStarted: func() {
+				close(started)
+			},
+		})
+	}()
+
+	// The one place Run is waited for, whether the test stopped the
+	// application or the test's context ended.
+	t.Cleanup(func() {
+		stopApplication()
+
+		select {
+		case err := <-runErr:
+			if err != nil {
+				t.Errorf("run application: %v", err)
+			}
+		case <-time.After(10 * time.Second):
+			t.Error("the application did not stop")
+		}
 	})
-	test.Mustf(t, err, "run application")
 
 	stack := defaultStack(t)
 	baseURL := "http://" + apiServer.Addr()
+
+	select {
+	case <-started:
+	case err := <-runErr:
+		// Put it back for the cleanup, which waits for Run.
+		runErr <- err
+
+		t.Fatalf("the application stopped while starting: %v", err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("the test server did not start")
+	}
 
 	clients := newClients(stack, client, baseURL)
 
@@ -604,21 +653,22 @@ func startElephantUser(t *testing.T) TestElephantUser {
 		client, baseURL, connect.WithInterceptors(rpc.PropagateHeaders()))
 
 	return TestElephantUser{
-		JWTKey:        jwtKey,
-		Messages:      clients.Messages,
-		Settings:      clients.Settings,
-		Configuration: clients.Configuration,
-		Comments:      clients.Comments,
-		Notifications: notifications,
-		Repository:    repository,
-		Stack:         stack,
-		Client:        client,
-		BaseURL:       baseURL,
-		Store:         store,
-		Validator:     validator,
-		Registry:      reg,
-		Metrics:       metrics,
-		DB:            dbpool,
+		StopApplication: stopApplication,
+		JWTKey:          jwtKey,
+		Messages:        clients.Messages,
+		Settings:        clients.Settings,
+		Configuration:   clients.Configuration,
+		Comments:        clients.Comments,
+		Notifications:   notifications,
+		Repository:      repository,
+		Stack:           stack,
+		Client:          client,
+		BaseURL:         baseURL,
+		Store:           store,
+		Validator:       validator,
+		Registry:        reg,
+		Metrics:         metrics,
+		DB:              dbpool,
 	}
 }
 
