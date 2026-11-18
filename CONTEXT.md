@@ -171,10 +171,23 @@ counter; comments have none yet, since nothing tails them.
 _Avoid_: Serial, sequence (the Postgres object, which is what this replaces)
 
 **Cursor**:
-The `after_id` a client carries between polls, valid across everything the
-caller can read because the ids it moves over are commit-ordered in one
-space.
-_Avoid_: Offset, position
+A reader's position in a log, valid because the ids it moves over are
+commit-ordered. On the polls the client carries it as `after_id`, one for
+everything the caller can read; on the notification stream the service holds
+it per subject and key, moves it forward only, and the client never sees it.
+_Avoid_: Offset, bookmark. "Position" is fine for a stream's in-memory copy
+of its cursor, which is what the code calls it.
+
+**Replay window**:
+How far back a notification stream sends rows after its cursors when it
+opens, asked for in the request and capped by the service.
+_Avoid_: History, backlog
+
+**Keepalive**:
+A message a notification stream sends when it has been quiet for a while, so
+that the ingress does not close it as idle; it carries the server's time and
+no data.
+_Avoid_: Heartbeat, ping
 
 **Wakeup**:
 What a NOTIFY is: a signal that a waiting poll should re-read, never the data

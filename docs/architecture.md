@@ -68,7 +68,9 @@ group context — so if the background tasks were `Required`, their clean exit
 at stop would shut the server down at stop time and the drain window would be
 lost. `stopScoped` in `internal/app.go` wraps both background tasks: it hands
 them the stop context and turns a return caused by the stop into a clean nil,
-so a normal shutdown exits 0.
+so a normal shutdown exits 0. For the same reason the server task holds until
+its quit context ends even when `ListenAndServe` returns early, as a test
+server's does: its return would cancel the group and start the stream drain.
 
 The validator's reload loop is not in the err-group; it is a goroutine owned by
 the validator, stopped through `Validator.Stop`. It reads schemas from the
@@ -354,6 +356,88 @@ is bound to a link in the same block with that id and the matching rel
 (`mention`, `see-also`), which revisor cannot express. Timestamps are RFC3339
 with fractional seconds, since `ListMentions` pages on `created`.
 
+### The notification stream
+
+`NotificationsService.Stream` (`internal/notifications_stream.go`) is the
+service's one long-lived connection: a Connect server stream a client keeps
+open, carrying feed rows and keepalives. A stream reads every key the token
+carries: the subject, the org and every unit, the set `getAllOwners` gives,
+sorted.
+
+**Start.** The handler checks the `user` scope and `replay_window_seconds`
+before it sends anything and wraps its context with
+`rpc.ContextWithTokenExpiry`. Each stream listens on the
+`notification_update` fan-out (`Notifications`) with a filter on its own key
+set, and nothing about a connection is stored, in memory or in the database:
+the listener is the stream's whole presence on the pod, and ends with it. It
+starts listening and sends the response headers, since a client's call
+returns only once they arrive and a stream with nothing to replay would
+otherwise keep it waiting for the first keepalive; then it replays. The
+replay reads the subject's cursors and walks the
+keys in sorted order, and within a key in id order:
+
+- A key with a cursor sends the rows after it, created no earlier than now
+  minus the replay window, 100 at a time (`ListNotificationsAfterID`).
+- The subject's own key without a cursor starts from id 0 under the same
+  window floor, so rows written for a subscription made on the subject's
+  behalf before its first stream are delivered. Retention is far longer than
+  the window, so the window is the bound.
+- A unit or org key without a cursor joins at now: its cursor is set to the
+  newest id under the key, 0 for a key without rows, and nothing is sent, so
+  joining a unit does not replay its history.
+
+The window is `replay_window_seconds`, 0 meaning `STREAM_REPLAY_DEFAULT`
+(24 h) and anything above `STREAM_REPLAY_MAX` (7 days) the maximum; a negative
+value is `invalid_argument`. Cursors for keys the token no longer carries are
+ignored and left in the table.
+
+**The cursor rule.** Every row is sent first and then the subject's cursor for
+its key is bumped to its id, forward only (`GREATEST`), so two pods bumping
+one cursor leave the highest. The stream also keeps its own position per key,
+starting at the cursor and moved by every send, and that is what it compares
+against: two streams of one subject share the stored cursor, and a stream
+that compared against it would skip a row the other stream had already
+bumped past. The shared cursor leaves one window: a second stream of the
+same subject that reads the cursor after the first stream bumped it past a
+row starts beyond that row and ignores its wakeup, so a device opening its
+stream in the milliseconds a row is being delivered to another device sees
+that row in its next list, not live. There are no acks. A send that never
+arrived is a missed toast, not a lost row: the client lists on start.
+
+**Live.** A wakeup `{key, id}` for a key in the stream's set is queued for the
+stream, up to 64; one at or below the stream's position is ignored, and
+otherwise the handler reads that one row by key and id and sends it. Delivery
+is driven by the payload, not by a cursor scan: every pod's LISTEN receives
+every wakeup, so two pods holding streams for one subject both send. The fan-out drops a wakeup that
+does not fit without telling anyone, so the stream's filter queues the wakeup
+itself and, when the queue is full, counts the drop in
+`elephant_user_stream_wakeups_dropped_total` and flags it. Before the next
+wakeup is handled, the stream re-reads each key from its position, the
+replay's read with the same window floor, so a dropped row is sent before
+anything after it moves the position past it. The listener registers on its
+own goroutine while the replay starts, so a row committed in the gap before
+it registers and after the replay read its key is not announced; that is the
+long-polls' window, and the next stream's replay sends the row. A row written
+while this replica's LISTEN connection is down is not announced either, and
+reaches the client the same way.
+
+**Keepalive.** A timer started after the replay and restarted on every send
+sends a `Keepalive` with the server time, RFC3339 with fractional seconds,
+when the stream has been quiet for `STREAM_KEEPALIVE` (20 s). It is what keeps
+a quiet stream under the ingress idle timeout; see
+[`ops.md`](ops.md#long-lived-connections).
+
+**End.** A stream has no clean end: the handler returns only when its context
+ends, and returns the context's cause, never nil, so a client never reads an
+ended stream as the end of the data. The token expiring gives
+`rpc.ErrTokenExpired`, answered `unauthenticated`; a deploy drain gives
+`rpc.ErrDraining`, answered `unavailable` (elephantine's drain interceptor,
+installed by `NewDefaultServiceOptions` on every `RegisterConnect` mount and
+closed by the API server before it shuts its listeners down); a client that
+goes away is `canceled`. A failed query or send while the context is live is
+`internal`. The listener goroutine is stopped and waited for before the
+handler returns.
+
 ### Retention cleaner
 
 `RunCleaner` (`internal/store.go`) runs under `joblock.Run` with lock name
@@ -387,7 +471,7 @@ connection per replica (`pg.Subscriber` on the direct pool):
 | `event_log_update` | every eventlog writer | `PollEventLog` handlers whose owner set contains the row's owner |
 | `schema_update` | generation activation | validator reload loop, `GetActiveConfigGeneration` long-polls |
 | `deprecation_update` | `UpdateDeprecation` | validator reload loop |
-| `notification_update` | the feed fan-out, once per key written, payload `{key, id}` | nobody yet |
+| `notification_update` | the feed fan-out, once per key written, payload `{key, id}` | `Stream` handlers whose key set contains the key |
 
 `pg_notify` is always issued inside the writing transaction; Postgres delivers
 it at commit and discards it on rollback. **LISTEN is a session-level command
@@ -471,8 +555,9 @@ is served on two paths from the same handler:
 
 `NotificationsService`, defined in `github.com/ttab/elephant-api/elephant/user/v1`,
 is Connect only: `POST /elephant.user.v1.NotificationsService/<Method>`, with
-no Twirp mount (`internal/notifications_service.go`). Its `Stream` is not
-served yet and answers `unimplemented`.
+no Twirp mount (`internal/notifications_service.go`, and
+`internal/notifications_stream.go` for the server stream `Stream`; see
+[The notification stream](#the-notification-stream)).
 
 Every request carries a bearer JWT; authentication is HTTP middleware in front of every handler, and a
 missing or invalid token is `unauthenticated` (401). Each handler then checks
@@ -487,7 +572,7 @@ its scope explicitly — an identified caller without the scope gets
 | `Comments` | `CreateComment`, `UpdateComment`, `DeleteComment`, `GetThread`, `ListThreads`, `ResolveThread`, `ReopenThread`, `ListMentions` | `user` and a document permission (below); `doc_admin` to delete others' comments |
 | `Configuration` | `RegisterConfigGeneration`, `ActivateConfigGeneration`, `UpdateDeprecation` | `schema_admin` |
 | `Configuration` | `GetActiveConfigGeneration`, `ListConfigGenerations`, `GetSchema`, `GetDeprecations` | `schema_admin` or `schema_read` |
-| `NotificationsService` | `Subscribe`, `Unsubscribe`, `ListSubscriptions`, `ListNotifications` | `user`; another user's subscriptions need more (below) |
+| `NotificationsService` | `Subscribe`, `Unsubscribe`, `ListSubscriptions`, `ListNotifications`, `Stream` | `user`; another user's subscriptions need more (below) |
 | `NotificationsService` | `Ingest` | `user_notify`, and no other scope will do |
 
 Identity comes from the token only: `sub` is the user, `org` a single
@@ -553,6 +638,7 @@ The `NotificationsService` RPCs and what they need beyond the scope:
 | `Unsubscribe` | for another user, write on every document in the request | nothing |
 | `ListSubscriptions` | for another user, `doc_admin` | the user's live subscriptions |
 | `ListNotifications` | nothing | rows under the caller's sub, org and units, newest first |
+| `Stream` | nothing | a stream: rows after the caller's cursors, then live rows and keepalives |
 | `Ingest` | nothing | nothing, so a producer never learns who was subscribed |
 
 An empty `user` is the caller; another user is a user uri in any of the three
@@ -583,7 +669,7 @@ key that already has it.
   the future; a negative `limit`; a malformed `before`; a missing `kind`, or one
   that is not reverse domain notation; a `recipient` that is not a user uri in
   one of those three forms, a `core://unit/` or a `core://org/` uri; a ref
-  without `rel`.
+  without `rel`; a negative `replay_window_seconds`.
 - `permission_denied`: a missing scope; another user's subscriptions without
   the document permission or `doc_admin`.
 - `not_found`: a document the repository does not know, for another user's
@@ -603,7 +689,9 @@ differences are pinned by the goldens in `testdata/TestDualStackBodies/`:
   context deadline. The long polls (`PollEventLog`, `PollMessages`,
   `PollInboxMessages`, `GetActiveConfigGeneration`) answer
   `deadline_exceeded` when it runs out and `canceled` when the caller goes
-  away (`waitEndedError`). Twirp has no timeout header.
+  away (`waitEndedError`). Twirp has no timeout header. A
+  `Connect-Timeout-Ms` on `Stream` ends it with `deadline_exceeded`, so a
+  client should not set one.
 
 Handlers construct every error with the `elephantine/rpc` helpers
 (`rpc.Internalf`, `rpc.InvalidArgument`, `rpc.NotFound`, ...), which return a
