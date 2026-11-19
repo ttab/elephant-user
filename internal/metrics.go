@@ -14,6 +14,17 @@ const (
 	LabelOutcome     = "outcome"
 	LabelFamily      = "family"
 	LabelItem        = "item"
+	LabelReason      = "reason"
+)
+
+// Why a stream sent a notification.
+const (
+	// StreamPushReplay is a row sent from the cursor when the stream
+	// opened.
+	StreamPushReplay = "replay"
+	// StreamPushLive is a row sent as it was written, or re-read after a
+	// dropped wakeup.
+	StreamPushLive = "live"
 )
 
 // NotificationFamilyOther labels feed rows from a family the metrics do not
@@ -60,6 +71,14 @@ type Metrics struct {
 	NotificationsWritten *prometheus.CounterVec
 	// CleanerDeletions counts rows the cleaner deleted by item.
 	CleanerDeletions *prometheus.CounterVec
+	// StreamNotificationsSent counts rows sent on notification streams
+	// by reason.
+	StreamNotificationsSent *prometheus.CounterVec
+	// StreamKeepalives counts keepalives sent on notification streams.
+	StreamKeepalives prometheus.Counter
+	// StreamWakeupsDropped counts notification wakeups a stream had no
+	// room for.
+	StreamWakeupsDropped prometheus.Counter
 }
 
 // NewMetrics registers the service metrics with reg and fails if any
@@ -108,6 +127,31 @@ func NewMetrics(reg prometheus.Registerer) (*Metrics, error) {
 			"feed rows past the retention. Flat while the feed is in use " +
 			"means the cleaner is not running.",
 	}, []string{LabelItem})
+
+	h.CounterVec(&m.StreamNotificationsSent, prometheus.CounterOpts{
+		Name: "elephant_user_stream_notifications_sent_total",
+		Help: "Notification rows sent on streams, by reason: replay for " +
+			"rows after the cursor when a stream opens, live for rows " +
+			"sent as they are written. Live flat while ingest counts " +
+			"means streams are not being woken; replay jumping after a " +
+			"deploy is every client catching up.",
+	}, []string{LabelReason})
+
+	h.Counter(&m.StreamKeepalives, prometheus.CounterOpts{
+		Name: "elephant_user_stream_keepalives_total",
+		Help: "Keepalives sent on quiet notification streams. Roughly open " +
+			"streams times three a minute when the feed is quiet; zero " +
+			"with streams open means quiet streams are left to the " +
+			"ingress idle timeout.",
+	})
+
+	h.Counter(&m.StreamWakeupsDropped, prometheus.CounterOpts{
+		Name: "elephant_user_stream_wakeups_dropped_total",
+		Help: "Notification wakeups a stream had no room for, each " +
+			"followed by a re-read of the stream's keys. Anything but " +
+			"rare means streams cannot keep up with the feed and are " +
+			"reading their keys again under load.",
+	})
 
 	err := h.Err()
 	if err != nil {

@@ -26,6 +26,7 @@ func TestMetricsLint(t *testing.T) {
 		string(internal.NotificationFamilyIngest)).Inc()
 	m.CleanerDeletions.WithLabelValues(
 		internal.CleanerDeletedNotification).Inc()
+	m.StreamNotificationsSent.WithLabelValues(internal.StreamPushLive).Inc()
 
 	problems, err := testutil.GatherAndLint(reg)
 	test.Mustf(t, err, "gather and lint metrics")

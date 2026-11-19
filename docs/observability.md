@@ -41,7 +41,8 @@ and the replica is validating against the previous one.
 ## RPC
 
 From elephantine; identical labels on every service in the fleet. `service`
-is the short name (`Settings`, `Messages`, `Comments`, `Configuration`), `method` the RPC,
+is the short name (`Settings`, `Messages`, `Comments`, `Configuration`,
+`NotificationsService`), `method` the RPC,
 `customer` the empty string (this service runs in an isolated environment per
 customer and does not label by org).
 
@@ -59,7 +60,21 @@ customer and does not label by org).
   `GetActiveConfigGeneration`); read their p50 as
   "how often something happened", not as latency. Every other method should
   be milliseconds, except that a comments RPC that misses the permission cache
-  also waits for the repository.
+  also waits for the repository. `Stream` is not in it.
+- `rpc_streams_active{service,method}`: gauge of the streams open on the
+  replica, `method="Stream"` here. It follows the number of open clients;
+  the service keeps no count of its own.
+  It moves between replicas at every deploy as drained streams reconnect; a
+  value that does not fall when the clients go away is a leak.
+- `rpc_stream_duration_seconds{service,method,customer}`: histogram of how
+  long a stream was open, buckets out to about four and a half hours. A
+  stream ends at token expiry at the latest, so the bulk sitting at the token
+  lifetime is normal; a bulk at about 60 s is the ingress idle timeout
+  cutting quiet streams, which means keepalives are not getting through.
+  Streams are counted in `rpc_requests_total` when they open and in the
+  response counters when they close, with the code that ended them:
+  `unauthenticated` for an expired token, `unavailable` for a drain,
+  `canceled` for a client that went away.
 - `rpc_protocol_responses_total{service,method,protocol,code,client_id}` —
   the same responses broken down by RPC code and by the calling application
   (the token's client id, empty for anonymous or refused calls). `protocol`
@@ -94,8 +109,8 @@ Document permission lookups against elephant-repository, made only when
 
 ## Notification feed
 
-The feed store's writes and the cleaner's share of it. No handler calls the
-fan-out yet, so both stay at zero until one does.
+The feed store's writes, what the streams send, and the cleaner's share of
+it.
 
 - `elephant_user_notifications_written_total{family}`: one per feed row
   written, which is one per event and key, by the family the event came from:
@@ -110,6 +125,23 @@ fan-out yet, so both stay at zero until one does.
   once per sweep on the replica holding the `cleaner` lock. Flat for longer
   than the cleanup interval while rows are written means the cleaner is not
   running; read it with `pg_job_lock_held{name="cleaner"}`.
+- `elephant_user_stream_notifications_sent_total{reason}`: rows sent on
+  streams. `replay` is rows after the cursor when a stream opens, `live` rows
+  sent as they were written, re-reads after a dropped wakeup included. One
+  row is counted once per stream it reaches, so live runs at about
+  `notifications_written` times the open streams per key. `live` flat while
+  rows are written and streams are open means the streams are not being woken:
+  look at the LISTEN connection (`task_restarts_total{task="pubsub"}`). A
+  `replay` jump right after a deploy is every drained client catching up.
+- `elephant_user_stream_keepalives_total`: keepalives sent on quiet streams,
+  about three a minute per quiet stream at the default 20 s. Zero while
+  streams are open and the feed is quiet means quiet streams are left to the
+  ingress idle timeout.
+- `elephant_user_stream_wakeups_dropped_total`: wakeups a stream had no room
+  for, each followed by a re-read of that stream's keys, so nothing is lost,
+  but every one costs a query per key. Anything but rare means streams cannot
+  keep up with the feed, a burst of rows under one key or a stream stuck on a
+  slow client.
 
 ## Database
 
