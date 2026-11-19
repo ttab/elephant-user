@@ -29,6 +29,10 @@ var _ CommentsStore = &PGStore{}
 // same uuid, thread and payload is answered as if it had just been
 // created, and one with another thread or payload is ErrCommentConflict.
 // Posting to a resolved thread reopens it.
+//
+// A post writes a created event to the feed, and a post that reopens the
+// thread a reopened event after it, see writeCommentEvent. A repeat writes
+// nothing.
 func (s *PGStore) CreateComment(
 	ctx context.Context, comment Comment,
 	documentUUID uuid.UUID, kind string,
@@ -41,12 +45,16 @@ func (s *PGStore) CreateComment(
 	var (
 		created *Comment
 		thread  *CommentThread
+		written int
 	)
 
 	err = pg.WithTX(ctx, s.dbpool, func(tx pgx.Tx) error {
 		q := postgres.New(tx)
 
-		// The thread row lock is the only lock the post takes. It
+		written = 0
+
+		// The thread row lock is the only data row lock the post
+		// takes; the feed's sequence rows come after it, last. It
 		// serialises posts to one thread, so the timestamp taken after
 		// it orders comments in commit order.
 		row, threadCreated, err := lockOrCreateThread(ctx, q,
@@ -118,12 +126,50 @@ func (s *PGStore) CreateComment(
 		}
 
 		thread, err = getThread(ctx, q, row.UUID)
+		if err != nil {
+			return err
+		}
 
-		return err
+		// The created event addresses a superset of the keys of the
+		// reopened event, so it goes first: the second fan-out then
+		// locks no sequence row the first did not.
+		n, err := writeCommentEvent(ctx, q, commentChange{
+			Kind:         CommentEventKindCreated,
+			DocumentUUID: row.DocumentUuid,
+			ThreadUUID:   row.UUID,
+			CommentUUID:  comment.UUID,
+			Actor:        comment.Author,
+			Mentioned:    mentioned,
+		})
+		if err != nil {
+			return err
+		}
+
+		written += n
+
+		if !reopened {
+			return nil
+		}
+
+		n, err = writeCommentEvent(ctx, q, commentChange{
+			Kind:         CommentEventKindReopened,
+			DocumentUUID: row.DocumentUuid,
+			ThreadUUID:   row.UUID,
+			Actor:        comment.Author,
+		})
+		if err != nil {
+			return err
+		}
+
+		written += n
+
+		return nil
 	})
 	if err != nil {
 		return nil, nil, err
 	}
+
+	s.countNotifications(NotificationFamilyComments, written)
 
 	return created, thread, nil
 }
@@ -241,6 +287,10 @@ func canonicalJSON(data []byte) ([]byte, error) {
 // UpdateComment implements [CommentsStore]. Only the author may replace
 // the payload, otherwise ErrNotCommentAuthor; a deleted comment is
 // ErrCommentDeleted. Mentions are derived again from the new payload.
+//
+// An edit writes an updated event to the feed, addressed to the document's
+// subscribers and to the users the new payload mentions that the old one
+// did not.
 func (s *PGStore) UpdateComment(
 	ctx context.Context, commentUUID uuid.UUID,
 	author string, payload json.RawMessage,
@@ -250,11 +300,16 @@ func (s *PGStore) UpdateComment(
 		return nil, err
 	}
 
-	var updated *Comment
+	var (
+		updated *Comment
+		written int
+	)
 
 	err = pg.WithTX(ctx, s.dbpool, func(tx pgx.Tx) error {
 		q := postgres.New(tx)
 
+		// Locks the comment row, then the thread row when touching
+		// it, then the feed's sequence rows.
 		row, err := lockComment(ctx, q, commentUUID)
 		if err != nil {
 			return err
@@ -286,6 +341,23 @@ func (s *PGStore) UpdateComment(
 		}
 
 		updated, err = getComment(ctx, q, commentUUID)
+		if err != nil {
+			return err
+		}
+
+		thread, err := getThread(ctx, q, row.ThreadUuid)
+		if err != nil {
+			return err
+		}
+
+		written, err = writeCommentEvent(ctx, q, commentChange{
+			Kind:         CommentEventKindUpdated,
+			DocumentUUID: thread.DocumentUUID,
+			ThreadUUID:   thread.UUID,
+			CommentUUID:  commentUUID,
+			Actor:        author,
+			Mentioned:    newlyMentioned(row.Mentioned, mentioned),
+		})
 
 		return err
 	})
@@ -293,20 +365,46 @@ func (s *PGStore) UpdateComment(
 		return nil, err
 	}
 
+	s.countNotifications(NotificationFamilyComments, written)
+
 	return updated, nil
+}
+
+// newlyMentioned returns the subjects in mentioned that are not in before.
+func newlyMentioned(before []string, mentioned []string) []string {
+	var added []string
+
+	for _, subject := range mentioned {
+		if slices.Contains(before, subject) {
+			continue
+		}
+
+		added = append(added, subject)
+	}
+
+	return added
 }
 
 // DeleteComment implements [CommentsStore]. The author may delete their
 // own comment, and an actor with mayDeleteOthers any comment; anyone else
 // gets ErrNotCommentAuthor. The comment stays in its thread without its
 // payload. Deleting a deleted comment is a successful no-op.
+//
+// A delete writes a deleted event to the feed, addressed to the
+// document's subscribers; a no-op writes nothing.
 func (s *PGStore) DeleteComment(
 	ctx context.Context, commentUUID uuid.UUID,
 	actor string, mayDeleteOthers bool,
 ) error {
-	return pg.WithTX(ctx, s.dbpool, func(tx pgx.Tx) error {
+	var written int
+
+	err := pg.WithTX(ctx, s.dbpool, func(tx pgx.Tx) error {
 		q := postgres.New(tx)
 
+		written = 0
+
+		// Locks the comment row, then the thread row when touching
+		// it, then the feed's sequence rows.
 		row, err := lockComment(ctx, q, commentUUID)
 		if err != nil {
 			return err
@@ -331,8 +429,33 @@ func (s *PGStore) DeleteComment(
 			return fmt.Errorf("delete comment: %w", err)
 		}
 
-		return touchThread(ctx, q, row.ThreadUuid, now)
+		err = touchThread(ctx, q, row.ThreadUuid, now)
+		if err != nil {
+			return err
+		}
+
+		thread, err := getThread(ctx, q, row.ThreadUuid)
+		if err != nil {
+			return err
+		}
+
+		written, err = writeCommentEvent(ctx, q, commentChange{
+			Kind:         CommentEventKindDeleted,
+			DocumentUUID: thread.DocumentUUID,
+			ThreadUUID:   thread.UUID,
+			CommentUUID:  commentUUID,
+			Actor:        actor,
+		})
+
+		return err
 	})
+	if err != nil {
+		return err
+	}
+
+	s.countNotifications(NotificationFamilyComments, written)
+
+	return nil
 }
 
 // lockComment row-locks a comment for an edit or a delete.
@@ -368,7 +491,8 @@ func touchThread(
 }
 
 // ResolveThread implements [CommentsStore]. Resolving a resolved thread is
-// a successful no-op.
+// a successful no-op. A resolve writes a resolved event to the feed,
+// addressed to the document's subscribers; a no-op writes nothing.
 func (s *PGStore) ResolveThread(
 	ctx context.Context, threadUUID uuid.UUID, actor string,
 ) (*CommentThread, error) {
@@ -376,7 +500,8 @@ func (s *PGStore) ResolveThread(
 }
 
 // ReopenThread implements [CommentsStore]. Reopening an open thread is a
-// successful no-op.
+// successful no-op. A reopen writes a reopened event to the feed,
+// addressed to the document's subscribers; a no-op writes nothing.
 func (s *PGStore) ReopenThread(
 	ctx context.Context, threadUUID uuid.UUID, actor string,
 ) (*CommentThread, error) {
@@ -387,11 +512,17 @@ func (s *PGStore) setThreadResolved(
 	ctx context.Context, threadUUID uuid.UUID,
 	actor string, resolve bool,
 ) (*CommentThread, error) {
-	var thread *CommentThread
+	var (
+		thread  *CommentThread
+		written int
+	)
 
 	err := pg.WithTX(ctx, s.dbpool, func(tx pgx.Tx) error {
 		q := postgres.New(tx)
 
+		written = 0
+
+		// Locks the thread row, then the feed's sequence rows.
 		row, err := q.GetCommentThreadForUpdate(ctx, threadUUID)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return ErrCommentThreadNotFound
@@ -401,7 +532,9 @@ func (s *PGStore) setThreadResolved(
 			return fmt.Errorf("lock thread: %w", err)
 		}
 
-		if row.Resolved.Valid != resolve {
+		changed := row.Resolved.Valid != resolve
+
+		if changed {
 			now := time.Now()
 
 			if resolve {
@@ -423,6 +556,25 @@ func (s *PGStore) setThreadResolved(
 		}
 
 		thread, err = getThread(ctx, q, threadUUID)
+		if err != nil {
+			return err
+		}
+
+		if !changed {
+			return nil
+		}
+
+		kind := CommentEventKindReopened
+		if resolve {
+			kind = CommentEventKindResolved
+		}
+
+		written, err = writeCommentEvent(ctx, q, commentChange{
+			Kind:         kind,
+			DocumentUUID: thread.DocumentUUID,
+			ThreadUUID:   thread.UUID,
+			Actor:        actor,
+		})
 
 		return err
 	})
@@ -430,7 +582,119 @@ func (s *PGStore) setThreadResolved(
 		return nil, err
 	}
 
+	s.countNotifications(NotificationFamilyComments, written)
+
 	return thread, nil
+}
+
+// commentChange is a comment write as the feed sees it. CommentUUID is the
+// nil uuid for a change to the thread itself. Mentioned holds the subjects
+// the write mentions newly: all of a new comment's mentions, the added ones
+// on an edit, none otherwise.
+type commentChange struct {
+	Kind         string
+	DocumentUUID uuid.UUID
+	ThreadUUID   uuid.UUID
+	CommentUUID  uuid.UUID
+	Actor        string
+	Mentioned    []string
+}
+
+// writeCommentEvent writes the change to the feed as one event under the
+// keys commentEventKeys resolves, inside the comment write's transaction,
+// and returns the number of rows written for the caller to count after
+// commit. It runs after the comment and thread rows are written: the
+// sequence rows insertNotifications locks are the last locks of the
+// transaction.
+//
+// The event carries the thread's document uuid but no document type, which
+// threads do not store. Its refs are the thread, the comment when there is
+// one, and a mention per newly mentioned user uri.
+func writeCommentEvent(
+	ctx context.Context, q *postgres.Queries, change commentChange,
+) (int, error) {
+	keys, err := commentEventKeys(ctx, q, change)
+	if err != nil {
+		return 0, err
+	}
+
+	refs := []NotificationReference{{
+		Rel:  CommentRefThread,
+		UUID: change.ThreadUUID.String(),
+	}}
+
+	if change.CommentUUID != uuid.Nil {
+		refs = append(refs, NotificationReference{
+			Rel:  CommentRefComment,
+			UUID: change.CommentUUID.String(),
+		})
+	}
+
+	for _, subject := range mentionedUsers(change.Mentioned) {
+		refs = append(refs, NotificationReference{
+			Rel:  CommentRefMention,
+			UUID: subject,
+		})
+	}
+
+	written, err := insertNotifications(ctx, q, NotificationSourceEvent{
+		Family:       NotificationFamilyComments,
+		Kind:         change.Kind,
+		DocumentUUID: change.DocumentUUID,
+		Refs:         refs,
+		Actor:        change.Actor,
+		EventUUID:    uuid.New(),
+	}, keys)
+	if err != nil {
+		return 0, fmt.Errorf("write %s feed rows: %w", change.Kind, err)
+	}
+
+	return len(written), nil
+}
+
+// commentEventKeys returns the feed keys a comment change is written
+// under: the live subscribers of the thread's document and the newly
+// mentioned users, without the actor, who never gets a row for their own
+// change. A reader who is both gets one row, as the event is written once.
+//
+// Thread participants (the thread's creator, its comment authors, the users
+// mentioned in it) are the open addition: if they become keys, they are a
+// query on the thread here, which is why this takes the thread uuid and the
+// transaction's queries.
+func commentEventKeys(
+	ctx context.Context, q *postgres.Queries, change commentChange,
+) ([]string, error) {
+	keys, err := listDocumentSubscribers(ctx, q, change.DocumentUUID)
+	if err != nil {
+		return nil, err
+	}
+
+	keys = append(keys, mentionedUsers(change.Mentioned)...)
+
+	keys = slices.DeleteFunc(keys, func(key string) bool {
+		return key == change.Actor
+	})
+
+	slices.Sort(keys)
+
+	return slices.Compact(keys), nil
+}
+
+// mentionedUsers returns the mentioned subjects that are user uris. A
+// mention of anything else, a unit say, is kept in the comment but neither
+// addressed nor referenced on the feed.
+func mentionedUsers(mentioned []string) []string {
+	var users []string
+
+	for _, subject := range mentioned {
+		if !isUserURI(subject) {
+			continue
+		}
+
+		users = append(users, subject)
+	}
+
+	return users
 }
 
 // GetCommentDocument implements [CommentsStore]. It answers the uuid of

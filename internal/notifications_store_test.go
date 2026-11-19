@@ -245,7 +245,7 @@ func TestNotificationsReads(t *testing.T) {
 
 	first := feedEvent()
 	first.Refs = []internal.NotificationReference{
-		{Rel: "thread", UUID: uuid.New(), Type: "core/comment-thread"},
+		{Rel: "thread", UUID: uuid.NewString(), Type: "core/comment-thread"},
 	}
 	first.Meta = map[string]string{"headline": "First"}
 

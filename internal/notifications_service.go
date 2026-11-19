@@ -423,7 +423,7 @@ func notificationToRPC(n Notification) *userv1.Notification {
 	for i, r := range n.Refs {
 		refs[i] = &userv1.Reference{
 			Rel:  r.Rel,
-			Uuid: r.UUID.String(),
+			Uuid: r.UUID,
 			Type: r.Type,
 		}
 	}
@@ -496,7 +496,7 @@ func (s *NotificationsService) Ingest(
 
 		refs[i] = NotificationReference{
 			Rel:  r.GetRel(),
-			UUID: refUUID,
+			UUID: refUUID.String(),
 			Type: r.GetType(),
 		}
 	}
