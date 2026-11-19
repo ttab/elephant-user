@@ -223,13 +223,15 @@ editor ── CreateComment(uuid, thread_uuid, document_uuid, payload) ──►
                           │   write granted? else permission_denied              cached 30 s
                           │ validate against the comments schema, inline id check
                           │ BEGIN
-                          │   SELECT comment_thread FOR UPDATE                  ← the only lock
+                          │   SELECT comment_thread FOR UPDATE                  ← the only row lock
                           │     missing: INSERT ... ON CONFLICT DO NOTHING, lock again
                           │   INSERT comment ON CONFLICT DO NOTHING             ← retry? answer it
                           │   bump thread updated (reopen if resolved)
-                          │ COMMIT
+                          │   keys: document subscribers + mentions - actor
+                          │   insertNotifications, created (then reopened)      ← sequence rows, sorted, last
+                          │ COMMIT                                              ← feed rows commit with it
                           ▼
-              nothing is notified; a client re-lists its threads to see changes
+              notification_update {key, id} per row; streams of those keys send it
 ```
 
 The weight here is outside the database: every comments RPC but

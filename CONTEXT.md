@@ -142,8 +142,9 @@ _Avoid_: Type, category
 A `rel: mention` link in a comment's text block, bound by id to a `<mention>`
 element, whose `uri` is a subject. The service derives a comment's mentioned
 subjects from these links on every write and never takes them from the
-caller. Nothing is delivered to the mentioned subject; `ListMentions` is how
-they find out.
+caller. A user mentioned by a write, newly on an edit, gets a feed row for
+it, with the mention among its refs; `ListMentions` lists every live comment
+that mentions them.
 _Avoid_: Tag, notification
 
 **Deleted comment**:
