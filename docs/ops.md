@@ -79,14 +79,49 @@ the lookup counter.
 
 | Port | Default | What is on it |
 |---|---|---|
-| API | `:1080` (`ADDR`) | `POST /twirp/elephant.user.<Service>/<Method>` (Twirp) and `POST /elephant.user.<Service>/<Method>` (Connect, also gRPC) for `Settings`, `Messages`, `Comments`, `Configuration`; `GET /health/alive`, `GET /version` |
+| API | `:1080` (`ADDR`) | `POST /twirp/elephant.user.<Service>/<Method>` (Twirp) and `POST /elephant.user.<Service>/<Method>` (Connect, also gRPC) for `Settings`, `Messages`, `Comments`, `Configuration`; Connect only for `NotificationsService` (below); `GET /health/alive`, `GET /version` |
 | API, TLS | `:1443` (`TLS_ADDR`), only when `TLS_CERT_PATH` is set | the same, over TLS |
 | Profile | `:1081` (`PROFILE_ADDR`) | `GET /health/ready`, `GET /metrics`, `/debug/pprof/*`, `/debug/vars`, `/debug/bom` |
+
+`NotificationsService` is served on Connect only, at
+`POST /elephant.user.v1.NotificationsService/<Method>`.
 
 The plain listener speaks HTTP/1.1 and HTTP/2. An ingress in front of the
 service has to route both the `/twirp/` prefix and the bare
 `/elephant.user.` prefix, or Connect callers get the ingress's 404. The
 profile port is internal and unauthenticated; it must not be exposed.
+
+## Long-lived connections
+
+`NotificationsService.Stream` holds one connection per open client for as
+long as the client keeps it, the first RPC here that does. How it works is in
+[architecture.md](architecture.md#the-notification-stream); what follows is
+what it asks of the infrastructure.
+
+- **The ingress idle timeout.** The hosted API ingress is an AWS ALB with the
+  default 60 s idle timeout; nothing in helm-elib or helm-elephant sets
+  `load-balancer-attributes`, and it does not buffer responses. `/` is routed
+  as a prefix, so the Connect path needs no ingress change.
+- **The keepalive is what keeps a quiet stream open.** A stream with nothing
+  to send sends a `Keepalive` after `STREAM_KEEPALIVE` (20 s) of silence,
+  well inside the 60 s. If the interval is raised past the idle timeout, or
+  something in front of the service has a shorter one, quiet streams are cut
+  by the proxy and the client sees the connection drop with no code.
+- **A deploy drains the streams.** On shutdown the API server cancels every
+  open stream before it stops listening, and each ends with `unavailable`; the
+  client reopens it against another replica and replays from its cursor. The
+  server then waits up to 10 s for the handlers to return. A rolling deploy
+  therefore shows as every stream on the old pod reconnecting at once:
+  `rpc_streams_active` drops on that pod and rises on the others, and
+  `elephant_user_stream_notifications_sent_total{reason="replay"}` jumps.
+- **A token expiring ends its stream** with `unauthenticated`, and the client
+  reopens it with a fresh token. Streams therefore last at most a token
+  lifetime; `rpc_stream_duration_seconds` clustered at that lifetime is normal.
+- **Watch the first stage rollout from a browser.** It is the live check of
+  the ingress: open the elephant client, leave a stream quiet for ten
+  minutes, and confirm in the network panel that it is still open and
+  receiving keepalives. If it drops, the fix is an idle timeout annotation on
+  the ingress group, not a code change.
 
 ## Data flows
 
@@ -227,7 +262,7 @@ Everything is in Postgres and Postgres is authoritative for all of it.
 | `message_write_lock` | per-recipient id counters for `message` | never cleaned |
 | `notification` | the feed: one row per event and key (user, unit or org uri), unique `(key, event_uuid)` | ids per key from `notification_sequence`; retention `NOTIFICATION_RETENTION` (180 days) |
 | `notification_sequence` | per-key id counters for `notification` | never cleaned |
-| `notification_cursor` | a subject's delivered position per key | moves forward only |
+| `notification_cursor` | a subject's delivered position per key | moves forward only; set to the newest id when a unit or org key is first streamed; rows for keys a token no longer carries are left |
 | `notification_subscription` | a subject's interest in a document, `expires_at` null for permanent | expired rows deleted by the cleaner |
 | `document_schema`, `config_generation`, `config_generation_schema`, `deprecation` | schema configuration | exactly one generation is active |
 | `job_lock` | the cleaner lock | rows are transient |
@@ -520,6 +555,9 @@ overwrote the first; the eventlog shows both versions. Known limitation; an
 5. `pgxpool_empty_acquire_wait_seconds_total{pool="main"}` — connection
    queuing; the pool is 16 by default, and this is the number that says
    whether that is right for the load.
+6. `rpc_streams_active{method="Stream"}`: open notification streams per
+   replica. It should follow the number of open clients; one that does not
+   fall after the pods it was on are gone is a leak.
 
 ## Common operations
 
@@ -608,8 +646,13 @@ unauthenticated and internal only.
   a retry could be matched on; the RPC is frozen and goes away with the
   notification stream. `PushInboxMessage` is idempotent on the payload uuid.
 - **Another tab does not see a read-state change until it re-lists.**
-  `inbox_state_update` is emitted but nothing delivers it to clients yet;
-  that is the notification stream's job.
+  `inbox_state_update` is emitted but nothing delivers it to clients; the
+  notification stream carries feed rows only.
+- **A notification missed live is not resent on the open stream.** A row
+  written while a replica's LISTEN connection is down, or in the moment
+  before a new stream's listener registers, is not pushed; the client sees it
+  in its next list, and the next stream's replay sends it unless a later row
+  under the same key moved the cursor past it.
 - **A comment change reaches no other client.** Comment writes notify
   nobody and send nothing to the notification feed yet; a client sees
   another's change only when it re-lists the threads.

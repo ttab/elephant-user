@@ -120,6 +120,27 @@ it.`,
 				Sources: cli.EnvVars("NOTIFICATION_RETENTION"),
 				Value:   internal.DefaultNotificationRetention,
 			},
+			&cli.DurationFlag{
+				Name: "stream-keepalive",
+				Usage: `How long a notification stream may stay quiet before
+the server sends a keepalive. Keep it under the ingress idle timeout.`,
+				Sources: cli.EnvVars("STREAM_KEEPALIVE"),
+				Value:   internal.DefaultStreamKeepalive,
+			},
+			&cli.DurationFlag{
+				Name: "stream-replay-default",
+				Usage: `How far back a notification stream replays when its
+request asks for no replay window.`,
+				Sources: cli.EnvVars("STREAM_REPLAY_DEFAULT"),
+				Value:   internal.DefaultStreamReplay,
+			},
+			&cli.DurationFlag{
+				Name: "stream-replay-max",
+				Usage: `The longest replay window a notification stream may ask
+for, 7 days by default; a longer request gets this.`,
+				Sources: cli.EnvVars("STREAM_REPLAY_MAX"),
+				Value:   internal.DefaultStreamReplayMax,
+			},
 			&cli.StringFlag{
 				Name:    "repository-endpoint",
 				Sources: cli.EnvVars("REPOSITORY_ENDPOINT"),
@@ -149,20 +170,23 @@ lookup: every document permission check is then refused.`,
 
 func runUser(ctx context.Context, cmd *cli.Command) error {
 	var (
-		addr              = cmd.String("addr")
-		profileAddr       = cmd.String("profile-addr")
-		tlsAddr           = cmd.String("tls-addr")
-		certFile          = cmd.String("cert-file")
-		keyFile           = cmd.String("key-file")
-		logLevel          = cmd.String("log-level")
-		connString        = cmd.String("db")
-		bouncerConnString = cmd.String("db-bouncer")
-		corsHosts         = cmd.StringSlice("cors-host")
-		cleanupInterval   = cmd.Duration("cleanup-interval")
-		dbMaxConns        = cmd.Int("db-max-conns")
-		repoEndpoint      = cmd.String("repository-endpoint")
-		subscriptionTTL   = cmd.Duration("subscription-ttl")
-		retention         = cmd.Duration("notification-retention")
+		addr                = cmd.String("addr")
+		profileAddr         = cmd.String("profile-addr")
+		tlsAddr             = cmd.String("tls-addr")
+		certFile            = cmd.String("cert-file")
+		keyFile             = cmd.String("key-file")
+		logLevel            = cmd.String("log-level")
+		connString          = cmd.String("db")
+		bouncerConnString   = cmd.String("db-bouncer")
+		corsHosts           = cmd.StringSlice("cors-host")
+		cleanupInterval     = cmd.Duration("cleanup-interval")
+		dbMaxConns          = cmd.Int("db-max-conns")
+		repoEndpoint        = cmd.String("repository-endpoint")
+		subscriptionTTL     = cmd.Duration("subscription-ttl")
+		retention           = cmd.Duration("notification-retention")
+		streamKeepalive     = cmd.Duration("stream-keepalive")
+		streamReplayDefault = cmd.Duration("stream-replay-default")
+		streamReplayMax     = cmd.Duration("stream-replay-max")
 	)
 
 	if cleanupInterval <= 0 {
@@ -175,6 +199,16 @@ func runUser(ctx context.Context, cmd *cli.Command) error {
 
 	if retention <= 0 {
 		return fmt.Errorf("notification-retention must be positive, got %s", retention)
+	}
+
+	for name, d := range map[string]time.Duration{
+		"stream-keepalive":      streamKeepalive,
+		"stream-replay-default": streamReplayDefault,
+		"stream-replay-max":     streamReplayMax,
+	} {
+		if d <= 0 {
+			return fmt.Errorf("%s must be positive, got %s", name, d)
+		}
 	}
 
 	logger := elephantine.SetUpLogger(logLevel, os.Stdout)
@@ -278,7 +312,10 @@ func runUser(ctx context.Context, cmd *cli.Command) error {
 	commentsService := internal.NewCommentsService(
 		store, validator, documentPermissions)
 	notificationsService := internal.NewNotificationsService(
-		logger, store, documentPermissions)
+		logger, store, store.Notifications, documentPermissions, metrics,
+		internal.WithStreamKeepalive(streamKeepalive),
+		internal.WithStreamReplayDefault(streamReplayDefault),
+		internal.WithStreamReplayMax(streamReplayMax))
 
 	err = internal.Run(ctx, internal.Parameters{
 		Logger:               logger,
