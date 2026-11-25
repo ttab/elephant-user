@@ -12,7 +12,8 @@ document in elephant-repository). Everything lives in Postgres and is served
 over Twirp and Connect as four services: `Settings`, `Messages`, `Comments` and
 `Configuration`. A fifth, `NotificationsService`, is Connect only: users
 subscribe to documents (`Subscribe`, `Unsubscribe`, `ListSubscriptions`),
-producers record events with `Ingest` under the `user_notify` scope, and a
+producers record events with `Ingest` under the `user_notify` scope, comment
+writes record their own for the document's subscribers and mentioned users, and a
 user lists the rows under its sub, org and units with `ListNotifications` and
 receives them as they are written on one long-lived `Stream`.
 

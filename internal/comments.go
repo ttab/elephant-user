@@ -32,6 +32,26 @@ var ErrCommentDeleted = errors.New("comment has been deleted")
 // because they did not write it.
 var ErrNotCommentAuthor = errors.New("not the author of the comment")
 
+// Kinds of the feed rows comment writes produce. A write is one event of
+// one kind, except a post to a resolved thread, which is two changes and
+// writes a created event and then a reopened event.
+const (
+	CommentEventKindCreated  = "se.ecms.user.comments.created"
+	CommentEventKindUpdated  = "se.ecms.user.comments.updated"
+	CommentEventKindDeleted  = "se.ecms.user.comments.deleted"
+	CommentEventKindResolved = "se.ecms.user.comments.resolved"
+	CommentEventKindReopened = "se.ecms.user.comments.reopened"
+)
+
+// Rels of the references on a comment feed row: the thread, the comment
+// for an event about a comment, and one mention per newly mentioned user,
+// with the user uri as its uuid.
+const (
+	CommentRefThread  = "thread"
+	CommentRefComment = "comment"
+	CommentRefMention = "mention"
+)
+
 // CommentsStore is the storage the Comments handlers need.
 type CommentsStore interface {
 	GetCommentDocument(

@@ -429,7 +429,15 @@ func (s *PGStore) ListSubscriptions(
 func (s *PGStore) ListDocumentSubscribers(
 	ctx context.Context, documentUUID uuid.UUID,
 ) ([]string, error) {
-	rows, err := s.q.ListDocumentSubscriptions(ctx, postgres.ListDocumentSubscriptionsParams{
+	return listDocumentSubscribers(ctx, s.q, documentUUID)
+}
+
+// listDocumentSubscribers is ListDocumentSubscribers on the given queries,
+// which lets a writer resolve keys inside its own transaction.
+func listDocumentSubscribers(
+	ctx context.Context, q *postgres.Queries, documentUUID uuid.UUID,
+) ([]string, error) {
+	rows, err := q.ListDocumentSubscriptions(ctx, postgres.ListDocumentSubscriptionsParams{
 		DocumentUuid: documentUUID,
 		Now:          pg.Time(time.Now()),
 	})

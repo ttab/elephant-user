@@ -51,11 +51,13 @@ type Notification struct {
 }
 
 // NotificationReference is something else an event refers to, such as a
-// thread, a comment or an assignment.
+// thread, a comment or an assignment. UUID is the referenced entity's uuid,
+// except for a mention, where it is the mentioned user's uri: the field is
+// a string on the wire, and a reader finds its own uri there.
 type NotificationReference struct {
-	Rel  string    `json:"rel"`
-	UUID uuid.UUID `json:"uuid"`
-	Type string    `json:"type,omitempty"`
+	Rel  string `json:"rel"`
+	UUID string `json:"uuid"`
+	Type string `json:"type,omitempty"`
 }
 
 // NotificationSourceEvent is the event a producer hands to the fan-out,

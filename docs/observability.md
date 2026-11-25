@@ -115,8 +115,10 @@ it.
 - `elephant_user_notifications_written_total{family}`: one per feed row
   written, which is one per event and key, by the family the event came from:
   `ingest`, `comments`, `settings`, `inbox`, `messages`, or `other` for a
-  value the metric does not know. A repeated event writes nothing and is not
-  counted. A family that stops counting has stopped producing notifications;
+  value the metric does not know. Two families produce rows today: `ingest`,
+  from `Ingest`, and `comments`, from every comment write that changes
+  something; the other values are reserved for producers not yet wired. A
+  repeated event writes nothing and is not counted. A family that stops counting has stopped producing notifications;
   a jump in `ingest` is a producer sending more, or a document with more
   subscribers.
 - `elephant_user_cleaner_deletions_total{item}`: rows the retention cleaner

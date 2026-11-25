@@ -188,9 +188,11 @@ delivered. Two mechanisms, same principle:
   [Inbox messages](#inbox-messages).
 - **Comments have no sequence id.** Threads and comments are keyed by
   client-made uuids, ordered inside a thread by `(created, uuid)` and listed
-  by `updated`. Timestamps are safe for that because nothing tails comments.
-  A comment log, when one is added, takes its ids from a `sequence_counter`
-  row, last in the writing transaction, never from the timestamps; see
+  by `updated`. Timestamps are safe for that because nothing tails comments
+  themselves: a reader that follows comment writes does so through the feed
+  rows they produce, whose ids are the feed's (below). A comment log, when
+  one is added, takes its ids from a `sequence_counter` row, last in the
+  writing transaction, never from the timestamps; see
   [ADR-0002](adr/0002-comment-access-follows-the-repository-document.md).
 - **System message ids** are per recipient, from `message_write_lock`: one
   atomic `INSERT ... ON CONFLICT DO UPDATE SET current_message_id = current + 1
@@ -312,9 +314,9 @@ comments, display order inside a thread is `(created, uuid)`, and threads
 are listed by `updated`. Why access, ids and deletes have this shape is
 [ADR-0002](adr/0002-comment-access-follows-the-repository-document.md).
 
-**A comment write locks at most one comment row and then the thread row,
-and nothing after it.** `CreateComment` locks the thread with
-`SELECT ... FOR UPDATE`, the only lock a post takes; when the
+**A comment write locks at most one comment row, then the thread row, then
+only the feed's sequence rows.** `CreateComment` locks the thread with
+`SELECT ... FOR UPDATE`, the only data row lock a post takes; when the
 thread does not exist yet it inserts it with `ON CONFLICT DO NOTHING` and
 locks it after, so two clients racing to create one thread both succeed and
 the loser's comment lands in the winner's thread. The comment's `created` is
@@ -331,8 +333,13 @@ author's or, with a flag the handler sets from `doc_admin`, anyone's, and
 deleting a deleted comment is a no-op. A delete keeps the row and its
 payload, but no read returns the payload or the mentions of a deleted
 comment. `ResolveThread` and `ReopenThread` lock the thread; resolving a
-resolved thread and reopening an open one change nothing. If a comment log is added, its counter is taken last, after the
-thread lock, as the eventlog rule requires.
+resolved thread and reopening an open one change nothing. Every write that
+changes something then writes its feed rows (below), whose sequence rows are
+taken last, in sorted key order, after the thread lock, as the eventlog rule
+requires; a comment log, if one is added, takes its counter there too.
+`TestConcurrentCommentThreadCreate` and `TestConcurrentCommentPosts` guard
+the comment and thread part of the order, `TestConcurrentNotificationFanOut`
+the sorted sequence rows.
 
 `mentioned` is derived in the store from the payload, the `uri` of every
 `rel: mention` link in the content blocks, deduplicated and sorted, and
@@ -340,8 +347,50 @@ derived again on every edit; it is never taken from the caller. Its GIN index
 serves `ListMentions`, which answers references to live comments without
 their payload.
 
-Comment and thread writes send no notification: nothing waits on them, and
-no comment events reach the notification feed yet.
+**Every comment write is a feed event, written in the comment's
+transaction.**
+After the comment and thread rows, the store resolves the keys and calls the
+feed's fan-out, `insertNotifications`, inside the same transaction, so the
+rows commit with the comment or not at all, and counts them in
+`elephant_user_notifications_written_total{family="comments"}` after commit
+(`writeCommentEvent`, `internal/comments_store.go`). The kinds:
+
+| Write | Kind | Refs |
+|---|---|---|
+| `CreateComment` | `se.ecms.user.comments.created` | `thread`, `comment`, a `mention` per mentioned user |
+| `UpdateComment` | `se.ecms.user.comments.updated` | `thread`, `comment`, a `mention` per newly mentioned user |
+| `DeleteComment` | `se.ecms.user.comments.deleted` | `thread`, `comment` |
+| `ResolveThread` | `se.ecms.user.comments.resolved` | `thread` |
+| `ReopenThread` | `se.ecms.user.comments.reopened` | `thread` |
+
+- **One event per change, with a fresh `event_uuid`.** The first comment on a
+  new thread is a `created` event and nothing else; there is no
+  thread-created kind. A post to a resolved thread makes two changes, the
+  comment and the reopen, and writes two events in the one transaction:
+  `created`, then `reopened` with its own `event_uuid`, so a client that
+  follows thread state reads the reopen by its kind, as it would an explicit
+  `ReopenThread`. `created` goes first because its keys are a superset of
+  the reopen's, so the second fan-out takes no sequence row the first did not
+  and the sorted lock order holds; under each key the `created` row has the
+  lower id. A repeated post, a repeated delete and a resolve or reopen that
+  changes nothing write no event.
+- **Keys** (`commentEventKeys`): the document's live subscribers, plus each
+  newly mentioned user, minus the actor, who never gets a row for their own
+  change. A reader who is both subscribed and mentioned gets one row, since
+  the event is written once under the union of the keys. Newly mentioned is
+  every mention of a new comment and, on an edit, the mentions the old
+  payload did not have; deletes, resolves and reopens address subscribers
+  only. Only user uris (`isUserURI`) count as mentioned users here; a
+  mention of anything else stays in the comment and reaches no key. Thread
+  participants (its creator, its authors, everyone mentioned in it) are not
+  keys: whether they should be is undecided, and adding them is a query in
+  `commentEventKeys`, which takes the thread and the transaction for it.
+- **The event.** `document_uuid` is the thread's document. `document_type`
+  is empty: threads do not store their document's type and `CreateComment`
+  does not carry it. The actor is the caller's subject. A `mention` ref
+  carries the user uri in `uuid`, which is a string on the wire, so a reader
+  finds its own uri there; the refs name only the users the write mentions
+  newly. No meta.
 
 The handlers (`internal/comments_service.go`) check access before they
 touch the store: the document a thread is on decides who may read and write
@@ -471,7 +520,7 @@ connection per replica (`pg.Subscriber` on the direct pool):
 | `event_log_update` | every eventlog writer | `PollEventLog` handlers whose owner set contains the row's owner |
 | `schema_update` | generation activation | validator reload loop, `GetActiveConfigGeneration` long-polls |
 | `deprecation_update` | `UpdateDeprecation` | validator reload loop |
-| `notification_update` | the feed fan-out, once per key written, payload `{key, id}` | `Stream` handlers whose key set contains the key |
+| `notification_update` | the feed fan-out, from `Ingest` and every comment write, once per key written, payload `{key, id}` | `Stream` handlers whose key set contains the key |
 
 `pg_notify` is always issued inside the writing transaction; Postgres delivers
 it at commit and discards it on rollback. **LISTEN is a session-level command
